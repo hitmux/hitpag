@@ -29,8 +29,8 @@ Hitmux `hitpag` 是一款由 Hitmux 开发的智能且用户友好的命令行�
     首先，确保您的系统是最新的，并安装了必要的编译工具：
 
     ```bash
-    sudo apt-get update
-    sudo apt-get install -y g++ cmake make
+    sudo apt update
+    sudo apt install -y g++ cmake make
     ```
 
 2.  **进入项目目录并创建构建文件夹**：
@@ -122,7 +122,7 @@ hitpag [选项] 源路径 目标路径
     `hitpag` 依赖于您系统中已安装的压缩工具。请运行以下命令确保它们都已安装：
 
     ```bash
-    sudo apt-get install -y tar gzip bzip2 xz-utils zip unzip rar unrar p7zip-full
+    sudo apt install -y tar gzip bzip2 xz-utils zip unzip rar unrar p7zip-full
     ```
 
 2.  **自动创建目录**：
