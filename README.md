@@ -28,8 +28,8 @@ Hitmux `hitpag` is an intelligent and user-friendly command-line tool developed 
     First, ensure your system is up-to-date and necessary compilation tools are installed:
 
     ```bash
-    sudo apt-get update
-    sudo apt-get install -y g++ cmake make
+    sudo apt update
+    sudo apt install -y g++ cmake make
     ```
 
 2.  **Navigate to project directory and create build folder**:
@@ -124,7 +124,7 @@ hitpag [options] source_path destination_path
     `hitpag` relies on the compression tools already installed on your system. Please run the following command to ensure they are all installed:
 
     ```bash
-    sudo apt-get install -y tar gzip bzip2 xz-utils zip unzip rar unrar p7zip-full
+    sudo apt install -y tar gzip bzip2 xz-utils zip unzip rar unrar p7zip-full
     ```
 
 2.  **Automatic directory creation**:
