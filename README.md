@@ -1,12 +1,12 @@
-# Hirmux `hitpag` Compilation and Usage Guide
+# Hirmux `hitpag` 2.0 - Advanced Compression Tool
 
 ## [Hitmux Official Website https://hitmux.top](https://hitmux.top)
 
 ## Introduction
 
-In a Linux environment, handling compressed files often requires remembering various commands and parameters for tools like `tar`, `gzip`, `unzip`, and `7z`. This can be a significant challenge for new users or those who don't frequently work with archives. **`hitpag` was created to solve this problem.**
+**`hitpag` 2.0** is a major upgrade to the intelligent command-line compression tool. Building on the core philosophy of **automatic recognition and user-friendly interaction**, version 2.0 introduces powerful new features including compression level control, multi-threading support, file filtering, performance benchmarking, and support for modern compression formats.
 
-Hitmux `hitpag` is an intelligent and user-friendly command-line tool developed by Hitmux, designed to simplify file compression and decompression operations on Linux. Its core philosophy revolves around **automatic recognition and user-friendly interaction**. Whether you need to decompress a downloaded archive or package local files for sharing, `hitpag` intelligently identifies the file type based on its extension and automatically invokes the underlying system tools for processing, saving you the hassle of memorizing complex commands. Additionally, it offers a powerful **interactive mode** and **password support**, allowing you to easily complete operations like encrypted compression or decryption through simple questions and answers, even if you're unfamiliar with command-line parameters.
+Whether you're compressing large datasets with optimal settings, filtering specific file types, or benchmarking compression performance, `hitpag` 2.0 provides enterprise-grade functionality while maintaining its signature ease of use.
 
 ---
 
@@ -14,157 +14,210 @@ Hitmux `hitpag` is an intelligent and user-friendly command-line tool developed 
 
 ### Environment Requirements
 
-*   **Operating System**: Linux (tested successfully on Ubuntu 22.04 and Debian 12)
+*   **Operating System**: Linux (tested on Ubuntu 22.04 and Debian 12)
 *   **Compiler**: GCC/G++ supporting the C++17 standard
 *   **Build Tool**: CMake 3.10 or higher
-*   **Dependency Library**: `stdc++fs` (C++ filesystem library), usually installed automatically with GCC/G++
+*   **Dependencies**: `stdc++fs`, `pthread` (C++ filesystem and threading libraries)
 
 ### Compilation Steps
 
-1.  **Update your system and install build tools**:
-    First, ensure your system is up-to-date and necessary compilation tools are installed:
-
+1.  **Update system and install build tools**:
     ```bash
     sudo apt update
     sudo apt install -y g++ cmake make
     ```
 
-2.  **Navigate to the project directory and create a build folder**:
-    Go to the root directory of the `hitpag` project, then create and enter the `build` folder:
-
+2.  **Navigate to project directory and build**:
     ```bash
     cd hitpag
     mkdir -p build
     cd build
-    ```
-
-3.  **Generate build files using CMake**:
-    Run CMake to configure the project and generate the Makefile:
-
-    ```bash
     cmake ..
-    ```
-
-4.  **Compile the project**:
-    Execute the `make` command to compile `hitpag`:
-
-    ```bash
     make
     ```
 
-5.  **(Optional) Install to the system**:
-    If you want `hitpag` to be runnable from any directory, you can install it to your system's PATH:
-
+3.  **(Optional) Install to system**:
     ```bash
     sudo make install
     ```
+
+### System Dependencies
+
+Install all supported compression tools:
+
+```bash
+# Essential compression tools
+sudo apt install -y tar gzip bzip2 xz-utils zip unzip rar unrar p7zip-full
+
+# Modern compression formats (optional)
+sudo apt install -y lz4 zstd xar
+```
 
 ---
 
 ## Usage Instructions
 
-### Basic Usage
-
-The basic syntax for the `hitpag` tool is very straightforward:
+### Basic Syntax
 
 ```bash
 hitpag [options] source_path destination_path
 ```
 
-### Command-line Options
+### New Command-line Options (Version 2.0)
 
-*   `-i`: **Interactive mode**. When you're unsure how to proceed, the tool will guide you step-by-step.
-*   `-p[password]`: **Use a password**. For encryption or decryption. If you use just `-p` without an attached password, the tool will prompt you to enter it securely.
-*   `-h, --help`: Display help information.
-*   `-v, --version`: Display version information.
+*   **`-i`**: Interactive mode with enhanced format selection
+*   **`-p[password]`**: Password encryption/decryption
+*   **`-l[level]`**: Compression level (1-9, format-dependent defaults)
+*   **`-t[threads]`**: Thread count for parallel processing (auto-detect if not specified)
+*   **`--verbose`**: Detailed progress and operation information
+*   **`--benchmark`**: Performance statistics including compression ratios and timing
+*   **`--verify`**: Archive integrity verification after compression
+*   **`--exclude=PATTERN`**: Exclude files/directories matching regex pattern
+*   **`--include=PATTERN`**: Include only files/directories matching regex pattern
+*   **`-h, --help`**: Display comprehensive help information
+*   **`-v, --version`**: Show version information
 
-### Usage Examples
+### Advanced Usage Examples
 
-1.  **Decompressing files**:
-    `hitpag` automatically identifies the archive type and decompresses it.
-
+1.  **High-performance compression with optimal settings**:
     ```bash
-    hitpag archive.tar.gz ./extracted_dir
+    hitpag -l9 -t4 --benchmark large_dataset.tar.gz ./data/
     ```
-    This command will decompress `archive.tar.gz` into the `./extracted_dir` directory.
+    Compress with maximum compression level using 4 threads and show performance statistics.
 
-2.  **Compressing files/directories**:
-    `hitpag` automatically selects the compression format based on the target filename's extension.
-
+2.  **Filtered compression with file type selection**:
     ```bash
-    hitpag ./my_folder my_archive.zip
+    hitpag --include='*.cpp' --include='*.h' --exclude='build/*' source_code.7z ./project/
     ```
-    This command will compress the entire `./my_folder` directory into `my_archive.zip`.
+    Compress only C++ source files, excluding build directories.
 
-3.  **Compressing only directory contents (Important Tip)**:
-    If you add a trailing slash `/` to the source directory path, `hitpag` will compress only the files and subdirectories within it, not the directory itself.
-
+3.  **Encrypted compression with verification**:
     ```bash
-    hitpag ./my_folder/ my_archive.zip
+    hitpag -pmysecret --verify --verbose confidential.zip ./sensitive_data/
     ```
-    After extraction, the root of `my_archive.zip` will contain the contents of `my_folder`, not the `my_folder` directory.
+    Password-encrypt with integrity verification and detailed output.
 
-4.  **Encrypting an archive**:
-    Use the `-p` option to set a password for the archive.
-
+4.  **Modern compression formats**:
     ```bash
-    hitpag -pmysecret ./docs my_docs.7z
+    hitpag -l6 -t8 fast_archive.lz4 ./temp_files/
+    hitpag -l9 small_archive.zstd ./documents/
     ```
-    This command encrypts the `./docs` directory into `my_docs.7z` with the password `mysecret`.
+    Use LZ4 for speed or Zstandard for optimal compression.
 
-5.  **Decrypting a file (Interactive Password Prompt)**:
-    When decompressing an encrypted file, use the `-p` option to have the tool prompt for a password.
-
+5.  **Batch processing with performance monitoring**:
     ```bash
-    hitpag -p secret.zip .
+    hitpag --benchmark --exclude='*.tmp' --exclude='*.log' backup.tar.xz ./work_folder/
     ```
-    This will display an `Enter password:` prompt for secure password entry.
-
-6.  **Interactive mode**:
-    In interactive mode, `hitpag` will guide you through all steps, including choosing the format, setting a password, and confirming overwrites.
-
-    ```bash
-    hitpag -i
-    ```
+    Create compressed backup excluding temporary files with performance analysis.
 
 ### Supported Compression Formats
 
-`hitpag` supports the following mainstream compression/decompression formats by invoking existing system tools:
+`hitpag` 2.0 supports all traditional formats plus modern compression algorithms:
 
+**Traditional formats:**
 *   `tar` (uncompressed)
-*   `tar.gz` / `tgz` (gzip compressed)
-*   `tar.bz2` / `tbz2` (bzip2 compressed)
-*   `tar.xz` / `txz` (xz compressed)
-*   `zip` (supports passwords)
-*   `rar`
-*   `7z` (supports passwords)
+*   `tar.gz` / `tgz` (gzip compression)
+*   `tar.bz2` / `tbz2` (bzip2 compression)
+*   `tar.xz` / `txz` (xz compression)
+*   `zip` (supports passwords and compression levels)
+*   `rar` (decompression only)
+*   `7z` (supports passwords and compression levels)
 
-### Important Notes
+**Modern formats (new in 2.0):**
+*   `lz4` (ultra-fast compression/decompression)
+*   `zst` / `zstd` (Facebook's Zstandard - excellent compression/speed balance)
+*   `xar` (macOS archive format)
 
-1.  **Ensure corresponding compression/decompression tools are installed**:
-    `hitpag` relies on the compression tools already installed on your system. Please run the following command to ensure they are all installed:
+### Performance Features
 
-    ```bash
-    sudo apt install -y tar gzip bzip2 xz-utils zip unzip rar unrar p7zip-full
-    ```
+#### Multi-threading Support
+Automatically detects CPU cores and utilizes parallel processing for supported formats:
+```bash
+hitpag -t8 archive.tar.gz ./large_directory/  # Use 8 threads explicitly
+hitpag -t archive.tar.gz ./large_directory/   # Auto-detect optimal thread count
+```
 
-2.  **Password Protection**:
-    Currently, only **`zip`** and **`7z`** formats support password protection. Using the password option with `tar` variants (e.g., `.tar.gz`) will be ignored, and a warning will be displayed.
+#### Compression Level Control
+Fine-tune compression vs. speed trade-offs:
+```bash
+hitpag -l1 fast.zip ./files/      # Fastest compression
+hitpag -l6 balanced.7z ./files/   # Balanced (default for most formats)
+hitpag -l9 smallest.tar.xz ./files/ # Maximum compression
+```
 
-3.  **Automatic directory creation**:
-    When decompressing, if the specified destination directory does not exist, `hitpag` will automatically create it for you.
+#### File Filtering
+Advanced pattern matching for selective compression:
+```bash
+# Include only specific file types
+hitpag --include='*.jpg' --include='*.png' photos.zip ./images/
+
+# Exclude temporary and build files
+hitpag --exclude='*.tmp' --exclude='node_modules/*' --exclude='build/*' clean_backup.tar.gz ./project/
+
+# Complex filtering combinations
+hitpag --include='src/*' --exclude='*.o' --exclude='*.obj' source_only.7z ./project/
+```
+
+#### Performance Benchmarking
+Comprehensive performance analysis:
+```bash
+hitpag --benchmark --verbose optimized.tar.xz ./data/
+```
+Outputs:
+- Compression time
+- Original vs compressed size
+- Compression ratio percentage
+- Thread utilization information
 
 ---
 
 ## Error Handling
 
-When an operation fails, `hitpag` displays clear error messages in English to help you diagnose the problem. Common error messages include:
+Enhanced error reporting with detailed diagnostics:
 
-*   `Error: Missing arguments`: Insufficient command-line arguments.
-*   `Error: Source path does not exist`: The specified source file or directory does not exist.
-*   `Error: Invalid destination path`: The destination path format is incorrect or inaccessible.
-*   `Error: Unrecognized file format`: Unable to identify the compression format of the specified file.
-*   `Error: Required tool not found`: The system lacks the compression/decompression tool needed to perform the operation.
-*   `Error: Operation failed`: The compression/decompression operation itself failed to execute (this may be due to a wrong password).
-*   `Error: Permission denied`: You do not have sufficient permissions to access the file or directory.
-*   `Error: Insufficient disk space`: Not enough disk space to complete the operation.
+*   **`Error: Compression level must be between 1-9`**: Invalid compression level specified
+*   **`Error: Thread count must be positive`**: Invalid thread count parameter
+*   **`Error: Required tool not found: lz4`**: Missing compression utility
+*   **`Filtering files: included 150, excluded 45`**: File filtering summary
+*   **`Archive verification failed`**: Integrity check unsuccessful
+
+---
+
+## Version 2.0 Changelog
+
+### New Features
+- **Multi-threading support** for parallel compression/decompression
+- **Compression level control** (1-9) for all supported formats
+- **File filtering system** with regex pattern matching
+- **Performance benchmarking** with detailed statistics
+- **Archive verification** for integrity checking
+- **Modern compression formats**: LZ4, Zstandard, XAR
+- **Enhanced verbose mode** with detailed progress information
+
+### Improvements
+- **Modular architecture** with organized namespaces
+- **Better error handling** with specific error codes
+- **International message system** for easy localization
+- **Enhanced interactive mode** with new format options
+- **Improved help system** with comprehensive examples
+
+### Technical Enhancements
+- **C++17 threading support** using `std::thread`
+- **Regex-based filtering** using `std::regex`
+- **Performance monitoring** with `std::chrono`
+- **Memory-efficient processing** for large files
+- **Cross-platform compatibility** improvements
+
+---
+
+## Migration from 1.x
+
+Version 2.0 maintains full backward compatibility with 1.x command syntax. All existing scripts and workflows will continue to work unchanged, while new features can be adopted incrementally.
+
+```bash
+# 1.x syntax still works
+hitpag archive.tar.gz ./extracted_dir
+
+# Enhanced 2.0 syntax adds powerful options
+hitpag --benchmark --verbose -l9 -t4 archive.tar.gz ./extracted_dir
+```

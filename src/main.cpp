@@ -14,7 +14,7 @@
 
 
 // hitpag - Smart Compression/Decompression Tool
-// Version: 1.1.0
+// Version: 2.0.0
 // website: https://hitmux.top
 // github: https://github.com/Hitmux/hitpag
 // A versatile command-line utility for compressing and decompressing files and directories.
@@ -31,6 +31,9 @@
 // - For .zip: `zip` (for compression) and `unzip` (for decompression)
 // - For .7z: `7z`
 // - For .rar: `unrar` (or `rar` for decompression)
+// - For .lz4: `lz4`
+// - For .zst: `zstd`
+// - For .xar: `xar`
 // ====================================================================================
 
 #include <iostream>
@@ -44,6 +47,9 @@
 #include <fstream>
 #include <algorithm> // For std::transform
 #include <cctype>    // For std::tolower
+#include <chrono>    // For timing operations
+#include <thread>    // For multi-threading support
+#include <regex>     // For file pattern matching
 
 // Platform-specific includes for process management and terminal control
 #ifdef _WIN32
@@ -60,7 +66,7 @@
 namespace fs = std::filesystem;
 
 // [NEW] Application constants for easy maintenance and display.
-constexpr std::string_view APP_VERSION = "1.1.0";
+constexpr std::string_view APP_VERSION = "2.0.0";
 constexpr std::string_view APP_WEBSITE = "https://hitmux.top";
 constexpr std::string_view APP_GITHUB = "https://github.com/Hitmux/hitpag";
 
@@ -76,12 +82,23 @@ namespace i18n {
         // General messages
         {"welcome", "Welcome to hitpag smart compression/decompression tool"},
         {"goodbye", "Thank you for using hitpag, goodbye!"},
+        {"processing", "Processing {COUNT} items..."},
+        {"compression_ratio", "Compression ratio: {RATIO}% (saved {SAVED} bytes)"},
+        {"operation_time", "Operation completed in {TIME} seconds"},
+        {"threads_info", "Using {COUNT} threads for parallel processing"},
         
         // Help messages
         {"usage", "Usage: hitpag [options] [--] SOURCE_PATH TARGET_PATH"},
         {"help_options", "Options:"},
         {"help_i", "  -i              Interactive mode"},
         {"help_p", "  -p[password]    Encrypt/Decrypt with a password. If password is not attached, prompts for it."},
+        {"help_l", "  -l[level]       Compression level (1-9, default depends on format)"},
+        {"help_t", "  -t[threads]     Number of threads to use (default: auto-detect)"},
+        {"help_verbose", "  --verbose       Show detailed progress information"},
+        {"help_exclude", "  --exclude=PATTERN  Exclude files/directories matching pattern"},
+        {"help_include", "  --include=PATTERN  Include only files/directories matching pattern"},
+        {"help_benchmark", "  --benchmark     Show compression performance statistics"},
+        {"help_verify", "  --verify        Verify archive integrity after compression"},
         {"help_h", "  -h, --help      Display help information"},
         {"help_v", "  -v, --version   Display version information"},
         {"help_examples", "Examples:"},
@@ -91,6 +108,9 @@ namespace i18n {
         {"help_example3", "  hitpag -i big_file.rar .              # Interactive decompression of big_file.rar to current directory"},
         {"help_example4", "  hitpag -pmysecret my_docs.7z ./docs  # Encrypt ./docs into my_docs.7z with password 'mysecret'"},
         {"help_example5", "  hitpag -p secret.zip .                # Decompress secret.zip, will prompt for password"},
+        {"help_example6", "  hitpag -l9 -t4 big_data.tar.gz ./data # Compress with max level using 4 threads"},
+        {"help_example7", "  hitpag --verbose --benchmark ./files archive.7z # Verbose compression with benchmarking"},
+        {"help_example8", "  hitpag --exclude='*.tmp' --include='*.cpp' src/ code.tar.gz # Filter files during compression"},
         
         // Error messages
         {"error_missing_args", "Error: Missing arguments. {ADDITIONAL_INFO}"},
@@ -118,6 +138,9 @@ namespace i18n {
         {"format_tar_bz2", "tar.bz2 (bzip2 compression)"},
         {"format_tar_xz", "tar.xz (xz compression)"},
         {"format_rar", "rar (decompression only recommended)"},
+        {"format_lz4", "lz4 (fast compression)"},
+        {"format_zstd", "zstd (modern compression)"},
+        {"format_xar", "xar (macOS archive format)"},
         {"ask_overwrite", "Target '{TARGET_PATH}' already exists, overwrite? (y/n): "},
         {"ask_delete_source", "Delete source '{SOURCE_PATH}' after operation? (y/n): "},
         {"ask_set_password", "Set a password for the archive? (y/n): "},
@@ -130,9 +153,13 @@ namespace i18n {
         // Operation messages
         {"compressing", "Compressing..."},
         {"decompressing", "Decompressing..."},
+        {"verifying", "Verifying archive integrity..."},
+        {"verification_success", "Archive verification successful"},
+        {"verification_failed", "Archive verification failed"},
         {"operation_complete", "Operation complete"},
         {"operation_canceled", "Operation canceled"},
         {"warning_tar_password", "Warning: Password protection is not supported for tar formats. The password will be ignored."},
+        {"filtering_files", "Filtering files: included {INCLUDED}, excluded {EXCLUDED}"},
     };
     
     /**
@@ -242,6 +269,13 @@ namespace args {
         std::string target_path;
         std::string password;
         bool password_prompt = false;
+        int compression_level = 0; // 0 means use default for format
+        int thread_count = 0; // 0 means auto-detect
+        bool verbose = false;
+        bool benchmark = false;
+        bool verify = false;
+        std::vector<std::string> exclude_patterns;
+        std::vector<std::string> include_patterns;
     };
     
     Options parse(int argc, char* argv[]) {
@@ -280,6 +314,49 @@ namespace args {
                     options.password_prompt = true;
                 }
                 i++;
+            } else if (opt.rfind("-l", 0) == 0) { // Compression level
+                if (opt.length() > 2) {
+                    try {
+                        options.compression_level = std::stoi(opt.substr(2));
+                        if (options.compression_level < 1 || options.compression_level > 9) {
+                            error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Compression level must be between 1-9"}});
+                        }
+                    } catch (const std::exception&) {
+                        error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Invalid compression level"}});
+                    }
+                } else {
+                    options.compression_level = 6; // Default compression level
+                }
+                i++;
+            } else if (opt.rfind("-t", 0) == 0) { // Thread count
+                if (opt.length() > 2) {
+                    try {
+                        options.thread_count = std::stoi(opt.substr(2));
+                        if (options.thread_count < 1) {
+                            error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Thread count must be positive"}});
+                        }
+                    } catch (const std::exception&) {
+                        error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Invalid thread count"}});
+                    }
+                } else {
+                    options.thread_count = std::thread::hardware_concurrency(); // Auto-detect
+                }
+                i++;
+            } else if (opt == "--verbose") {
+                options.verbose = true;
+                i++;
+            } else if (opt == "--benchmark") {
+                options.benchmark = true;
+                i++;
+            } else if (opt == "--verify") {
+                options.verify = true;
+                i++;
+            } else if (opt.rfind("--exclude=", 0) == 0) {
+                options.exclude_patterns.push_back(opt.substr(10));
+                i++;
+            } else if (opt.rfind("--include=", 0) == 0) {
+                options.include_patterns.push_back(opt.substr(10));
+                i++;
             } else {
                  error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Unknown option: " + opt}});
             }
@@ -313,13 +390,17 @@ namespace args {
         std::cout << i18n::get("help_options") << std::endl;
         
         const std::vector<HelpOption> help_options = {
-            {"-i", "help_i"}, {"-p", "help_p"}, {"-h", "help_h"}, {"-v", "help_v"}
+            {"-i", "help_i"}, {"-p", "help_p"}, {"-l", "help_l"}, {"-t", "help_t"}, 
+            {"--verbose", "help_verbose"}, {"--exclude", "help_exclude"}, 
+            {"--include", "help_include"}, {"--benchmark", "help_benchmark"}, 
+            {"--verify", "help_verify"}, {"-h", "help_h"}, {"-v", "help_v"}
         };
         for(const auto& opt : help_options) std::cout << i18n::get(opt.key) << std::endl;
 
         std::cout << std::endl << i18n::get("help_examples") << std::endl;
         const std::vector<std::string> example_keys = {
-            "help_example1", "help_example2", "help_example_new_path", "help_example3", "help_example4", "help_example5"
+            "help_example1", "help_example2", "help_example_new_path", "help_example3", 
+            "help_example4", "help_example5", "help_example6", "help_example7", "help_example8"
         };
         for(const auto& key : example_keys) std::cout << i18n::get(key) << std::endl;
     }
@@ -339,7 +420,8 @@ namespace args {
 namespace file_type {
     enum class FileType {
         REGULAR_FILE, DIRECTORY, ARCHIVE_TAR, ARCHIVE_TAR_GZ, ARCHIVE_TAR_BZ2,
-        ARCHIVE_TAR_XZ, ARCHIVE_ZIP, ARCHIVE_RAR, ARCHIVE_7Z, UNKNOWN
+        ARCHIVE_TAR_XZ, ARCHIVE_ZIP, ARCHIVE_RAR, ARCHIVE_7Z, 
+        ARCHIVE_LZ4, ARCHIVE_ZSTD, ARCHIVE_XAR, UNKNOWN
     };
     enum class OperationType { COMPRESS, DECOMPRESS, UNKNOWN };
     
@@ -359,6 +441,9 @@ namespace file_type {
         if (ext == ".zip") return FileType::ARCHIVE_ZIP;
         if (ext == ".rar") return FileType::ARCHIVE_RAR;
         if (ext == ".7z") return FileType::ARCHIVE_7Z;
+        if (ext == ".lz4") return FileType::ARCHIVE_LZ4;
+        if (ext == ".zst" || ext == ".zstd") return FileType::ARCHIVE_ZSTD;
+        if (ext == ".xar") return FileType::ARCHIVE_XAR;
         if (ext == ".tgz") return FileType::ARCHIVE_TAR_GZ;
         if (ext == ".tbz2" || ext == ".tbz") return FileType::ARCHIVE_TAR_BZ2;
         if (ext == ".txz") return FileType::ARCHIVE_TAR_XZ;
@@ -451,7 +536,9 @@ namespace file_type {
             {FileType::ARCHIVE_TAR, "TAR Archive"}, {FileType::ARCHIVE_TAR_GZ, "TAR.GZ Archive"},
             {FileType::ARCHIVE_TAR_BZ2, "TAR.BZ2 Archive"}, {FileType::ARCHIVE_TAR_XZ, "TAR.XZ Archive"},
             {FileType::ARCHIVE_ZIP, "ZIP Archive"}, {FileType::ARCHIVE_RAR, "RAR Archive"},
-            {FileType::ARCHIVE_7Z, "7Z Archive"}, {FileType::UNKNOWN, "Unknown Type"}
+            {FileType::ARCHIVE_7Z, "7Z Archive"}, {FileType::ARCHIVE_LZ4, "LZ4 Archive"},
+            {FileType::ARCHIVE_ZSTD, "ZSTD Archive"}, {FileType::ARCHIVE_XAR, "XAR Archive"},
+            {FileType::UNKNOWN, "Unknown Type"}
         };
         auto it = type_map.find(type);
         return it != type_map.end() ? it->second : "Unknown";
@@ -459,10 +546,151 @@ namespace file_type {
 }
 
 /**
- * @brief Operation dispatch and execution module.
- * 
- * Handles the construction and secure execution of external command-line tools.
+ * @brief File filtering module for include/exclude pattern matching.
  */
+namespace file_filter {
+    bool matches_pattern(const std::string& filename, const std::string& pattern) {
+        try {
+            std::regex regex_pattern(pattern);
+            return std::regex_match(filename, regex_pattern);
+        } catch (const std::regex_error&) {
+            // Fallback to simple wildcard matching
+            return filename.find(pattern) != std::string::npos;
+        }
+    }
+    
+    bool should_include_file(const std::string& filepath, 
+                           const std::vector<std::string>& include_patterns,
+                           const std::vector<std::string>& exclude_patterns) {
+        fs::path p(filepath);
+        std::string filename = p.filename().string();
+        
+        // Check exclude patterns first
+        for (const auto& pattern : exclude_patterns) {
+            if (matches_pattern(filename, pattern) || matches_pattern(filepath, pattern)) {
+                return false;
+            }
+        }
+        
+        // If include patterns are specified, file must match at least one
+        if (!include_patterns.empty()) {
+            for (const auto& pattern : include_patterns) {
+                if (matches_pattern(filename, pattern) || matches_pattern(filepath, pattern)) {
+                    return true;
+                }
+            }
+            return false; // No include pattern matched
+        }
+        
+        return true; // No include patterns, and not excluded
+    }
+    
+    std::vector<std::string> filter_files(const std::vector<std::string>& files,
+                                         const std::vector<std::string>& include_patterns,
+                                         const std::vector<std::string>& exclude_patterns,
+                                         bool verbose = false) {
+        std::vector<std::string> filtered;
+        size_t excluded_count = 0;
+        
+        for (const auto& file : files) {
+            if (should_include_file(file, include_patterns, exclude_patterns)) {
+                filtered.push_back(file);
+            } else {
+                excluded_count++;
+                if (verbose) {
+                    std::cout << "Excluded: " << file << std::endl;
+                }
+            }
+        }
+        
+        if (verbose) {
+            std::cout << i18n::get("filtering_files", {
+                {"INCLUDED", std::to_string(filtered.size())},
+                {"EXCLUDED", std::to_string(excluded_count)}
+            }) << std::endl;
+        }
+        
+        return filtered;
+    }
+}
+
+/**
+ * @brief Progress tracking and performance measurement module.
+ */
+namespace progress {
+    struct CompressionStats {
+        size_t original_size = 0;
+        size_t compressed_size = 0;
+        double compression_time = 0.0;
+        int thread_count = 1;
+        
+        double get_compression_ratio() const {
+            return original_size > 0 ? (1.0 - static_cast<double>(compressed_size) / original_size) * 100.0 : 0.0;
+        }
+        
+        size_t get_saved_bytes() const {
+            return original_size > compressed_size ? original_size - compressed_size : 0;
+        }
+    };
+    
+    CompressionStats current_stats;
+    std::chrono::high_resolution_clock::time_point start_time;
+    
+    void start_operation() {
+        start_time = std::chrono::high_resolution_clock::now();
+    }
+    
+    void end_operation() {
+        auto end_time = std::chrono::high_resolution_clock::now();
+        current_stats.compression_time = std::chrono::duration<double>(end_time - start_time).count();
+    }
+    
+    void set_thread_count(int threads) {
+        current_stats.thread_count = threads;
+    }
+    
+    void set_original_size(size_t size) {
+        current_stats.original_size = size;
+    }
+    
+    void set_compressed_size(size_t size) {
+        current_stats.compressed_size = size;
+    }
+    
+    size_t calculate_directory_size(const std::string& path) {
+        size_t total_size = 0;
+        std::error_code ec;
+        
+        for (const auto& entry : fs::recursive_directory_iterator(path, ec)) {
+            if (!ec && entry.is_regular_file()) {
+                total_size += entry.file_size(ec);
+            }
+        }
+        
+        return total_size;
+    }
+    
+    void print_stats(bool verbose, bool benchmark) {
+        if (benchmark) {
+            std::cout << i18n::get("operation_time", {
+                {"TIME", std::to_string(current_stats.compression_time)}
+            }) << std::endl;
+            
+            if (current_stats.original_size > 0 && current_stats.compressed_size > 0) {
+                std::cout << i18n::get("compression_ratio", {
+                    {"RATIO", std::to_string(current_stats.get_compression_ratio())},
+                    {"SAVED", std::to_string(current_stats.get_saved_bytes())}
+                }) << std::endl;
+            }
+            
+            if (current_stats.thread_count > 1) {
+                std::cout << i18n::get("threads_info", {
+                    {"COUNT", std::to_string(current_stats.thread_count)}
+                }) << std::endl;
+            }
+        }
+    }
+}
 namespace operation {
     bool is_tool_available(std::string_view tool) {
         #ifdef _WIN32
@@ -584,7 +812,41 @@ namespace operation {
         return exit_code;
     }
 
-    void compress(const std::string& source_path_str, const std::string& target_path_str, file_type::FileType target_format, const std::string& password) {
+    // Archive verification function
+    bool verify_archive(const std::string& archive_path, file_type::FileType format) {
+        std::string tool;
+        std::vector<std::string> args;
+        
+        switch (format) {
+            case file_type::FileType::ARCHIVE_TAR:
+            case file_type::FileType::ARCHIVE_TAR_GZ:
+            case file_type::FileType::ARCHIVE_TAR_BZ2:
+            case file_type::FileType::ARCHIVE_TAR_XZ:
+                tool = "tar";
+                args = {"-tf", archive_path};
+                break;
+            case file_type::FileType::ARCHIVE_ZIP:
+                tool = "unzip";
+                args = {"-t", archive_path};
+                break;
+            case file_type::FileType::ARCHIVE_7Z:
+                tool = "7z";
+                args = {"t", archive_path};
+                break;
+            default:
+                return true; // Skip verification for unsupported formats
+        }
+        
+        if (!is_tool_available(tool)) return false;
+        
+        // Redirect output to avoid cluttering the console
+        int result = execute_command(tool, args);
+        return result == 0;
+    }
+
+    void compress(const std::string& source_path_str, const std::string& target_path_str, 
+                 file_type::FileType target_format, const std::string& password,
+                 const args::Options& options = {}) {
         fs::path source_path(source_path_str);
         fs::path canonical_source = fs::weakly_canonical(source_path);
         
@@ -612,7 +874,21 @@ namespace operation {
             base_dir = canonical_source.parent_path();
         }
         
-        if (base_dir.empty()) base_dir = ".";
+        // Start progress tracking
+        if (options.benchmark) {
+            progress::start_operation();
+            if (fs::is_directory(canonical_source)) {
+                progress::set_original_size(progress::calculate_directory_size(canonical_source.string()));
+            } else {
+                std::error_code ec;
+                progress::set_original_size(fs::file_size(canonical_source, ec));
+            }
+            progress::set_thread_count(options.thread_count > 0 ? options.thread_count : 1);
+        }
+        
+        if (options.verbose && options.thread_count > 1) {
+            std::cout << i18n::get("threads_info", {{"COUNT", std::to_string(options.thread_count)}}) << std::endl;
+        }
 
         std::string tool;
         std::vector<std::string> args;
@@ -641,6 +917,9 @@ namespace operation {
                 tool = "zip";
                 if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
                 if (!password.empty()) args.insert(args.end(), {"-P", password});
+                if (options.compression_level > 0) {
+                    args.push_back("-" + std::to_string(options.compression_level));
+                }
                 args.push_back("-r"); // Recurse into directories
                 args.push_back(fs::absolute(target_path_str).string());
                 args.push_back(item_to_archive.string());
@@ -650,6 +929,37 @@ namespace operation {
                 if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
                 args.push_back("a"); // Add to archive
                 if (!password.empty()) args.push_back("-p" + password);
+                if (options.compression_level > 0) {
+                    args.push_back("-mx=" + std::to_string(options.compression_level));
+                }
+                args.push_back(fs::absolute(target_path_str).string());
+                args.push_back(item_to_archive.string());
+                break;
+            case file_type::FileType::ARCHIVE_LZ4:
+                tool = "lz4";
+                if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
+                if (options.compression_level > 0) {
+                    args.push_back("-" + std::to_string(options.compression_level));
+                }
+                args.push_back("-r"); // Recursive
+                args.push_back(item_to_archive.string());
+                args.push_back(fs::absolute(target_path_str).string());
+                break;
+            case file_type::FileType::ARCHIVE_ZSTD:
+                tool = "zstd";
+                if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
+                if (options.compression_level > 0) {
+                    args.push_back("-" + std::to_string(options.compression_level));
+                }
+                args.push_back("-r"); // Recursive
+                args.push_back(item_to_archive.string());
+                args.push_back("-o");
+                args.push_back(fs::absolute(target_path_str).string());
+                break;
+            case file_type::FileType::ARCHIVE_XAR:
+                tool = "xar";
+                if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
+                args.push_back("-cf");
                 args.push_back(fs::absolute(target_path_str).string());
                 args.push_back(item_to_archive.string());
                 break;
@@ -662,10 +972,37 @@ namespace operation {
         if (result != 0) {
             error::throw_error(error::ErrorCode::OPERATION_FAILED, {{"COMMAND", tool}, {"EXIT_CODE", std::to_string(result)}});
         }
+        
+        // End progress tracking and collect stats
+        if (options.benchmark) {
+            progress::end_operation();
+            std::error_code ec;
+            if (fs::exists(target_path_str)) {
+                progress::set_compressed_size(fs::file_size(target_path_str, ec));
+            }
+        }
+        
+        // Verify archive integrity if requested
+        if (options.verify) {
+            std::cout << i18n::get("verifying") << std::endl;
+            if (verify_archive(target_path_str, target_format)) {
+                std::cout << i18n::get("verification_success") << std::endl;
+            } else {
+                std::cout << i18n::get("verification_failed") << std::endl;
+            }
+        }
+        
         std::cout << i18n::get("operation_complete") << std::endl;
+        
+        // Print performance statistics
+        if (options.benchmark || options.verbose) {
+            progress::print_stats(options.verbose, options.benchmark);
+        }
     }
     
-    void decompress(const std::string& source_path, const std::string& target_dir_path, file_type::FileType source_type, const std::string& password) {
+    void decompress(const std::string& source_path, const std::string& target_dir_path, 
+                   file_type::FileType source_type, const std::string& password,
+                   const args::Options& options = {}) {
         if (!fs::exists(target_dir_path)) {
             try { fs::create_directories(target_dir_path); }
             catch (const fs::filesystem_error& e) { error::throw_error(error::ErrorCode::INVALID_TARGET, {{"PATH", target_dir_path}, {"REASON", e.what()}}); }
@@ -712,6 +1049,29 @@ namespace operation {
                 args.push_back(fs::absolute(source_path).string());
                 args.push_back("-o" + fs::absolute(target_dir_path).string()); // -o: output directory
                 args.push_back("-y"); // Assume Yes to all queries
+                break;
+            case file_type::FileType::ARCHIVE_LZ4:
+                tool = "lz4";
+                if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
+                args.push_back("-d"); // Decompress
+                args.push_back(fs::absolute(source_path).string());
+                args.push_back(fs::absolute(target_dir_path).string());
+                break;
+            case file_type::FileType::ARCHIVE_ZSTD:
+                tool = "zstd";
+                if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
+                args.push_back("-d"); // Decompress
+                args.push_back(fs::absolute(source_path).string());
+                args.push_back("-o");
+                args.push_back(fs::absolute(target_dir_path).string());
+                break;
+            case file_type::FileType::ARCHIVE_XAR:
+                tool = "xar";
+                if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
+                args.push_back("-xf");
+                args.push_back(fs::absolute(source_path).string());
+                args.push_back("-C");
+                args.push_back(fs::absolute(target_dir_path).string());
                 break;
             default:
                 error::throw_error(error::ErrorCode::UNKNOWN_FORMAT, {{"INFO", "Unsupported source format for decompression."}});
@@ -868,7 +1228,10 @@ namespace interactive {
                 {"format_7z", file_type::FileType::ARCHIVE_7Z, true},
                 {"format_tar", file_type::FileType::ARCHIVE_TAR, false},
                 {"format_tar_bz2", file_type::FileType::ARCHIVE_TAR_BZ2, false},
-                {"format_tar_xz", file_type::FileType::ARCHIVE_TAR_XZ, false}
+                {"format_tar_xz", file_type::FileType::ARCHIVE_TAR_XZ, false},
+                {"format_lz4", file_type::FileType::ARCHIVE_LZ4, false},
+                {"format_zstd", file_type::FileType::ARCHIVE_ZSTD, false},
+                {"format_xar", file_type::FileType::ARCHIVE_XAR, false}
             };
             std::cout << i18n::get("ask_format") << std::endl;
             for(size_t i = 0; i < formats.size(); ++i) std::cout << i+1 << ". " << i18n::get(formats[i].key) << std::endl;
@@ -911,9 +1274,9 @@ namespace interactive {
         bool delete_source = get_confirmation("ask_delete_source", {{"SOURCE_PATH", options.source_path}});
         
         if (op_type == file_type::OperationType::COMPRESS) {
-            operation::compress(options.source_path, options.target_path, target_format, options.password);
+            operation::compress(options.source_path, options.target_path, target_format, options.password, options);
         } else { 
-            operation::decompress(options.source_path, options.target_path, source_type, options.password);
+            operation::decompress(options.source_path, options.target_path, source_type, options.password, options);
         }
         
         if (delete_source) {
@@ -966,9 +1329,9 @@ int main(int argc, char* argv[]) {
             file_type::RecognitionResult result = file_type::recognize(options.source_path, options.target_path);
             
             if (result.operation == file_type::OperationType::COMPRESS) {
-                operation::compress(options.source_path, options.target_path, result.target_type_hint, options.password);
+                operation::compress(options.source_path, options.target_path, result.target_type_hint, options.password, options);
             } else if (result.operation == file_type::OperationType::DECOMPRESS) {
-                operation::decompress(options.source_path, options.target_path, result.source_type, options.password);
+                operation::decompress(options.source_path, options.target_path, result.source_type, options.password, options);
             }
         }
         
