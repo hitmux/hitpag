@@ -149,7 +149,8 @@ hitpag -l9 smallest.tar.xz ./files/ # 最大压缩
 ```
 
 #### 文件过滤
-通过高级模式匹配进行选择性压缩：```bash
+通过高级模式匹配进行选择性压缩：
+```bash
 # 仅包含特定文件类型
 hitpag --include='*.jpg' --include='*.png' photos.zip ./images/
 
