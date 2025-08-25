@@ -1,5 +1,7 @@
 # Hirmux `hitpag` 2.0 - 高级压缩工具
 
+## [Hitmux https://hitmux.top](https://hitmux.top)
+
 [English](README.md)
 
 ## 简介
