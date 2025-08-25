@@ -5,6 +5,8 @@
 [![GitHub](https://img.shields.io/badge/GitHub-Hitmux/hitpag-blue)](https://github.com/Hitmux/hitpag)
 [![Website](https://img.shields.io/badge/Website-hitmux.top-green)](https://hitmux.top)
 
+[English](README.md) | [简体中文](README_zh.md)
+
 ---
 
 ## 🚀 核心功能
