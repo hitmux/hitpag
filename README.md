@@ -1,227 +1,283 @@
-# Hirmux `hitpag` 2.0 - Advanced Compression Tool
+# hitpag 2.0 - Smart Compression Tool
 
+**Intelligent, Powerful, User-friendly Next-generation Command-line Compression Tool**
 
-## [Hitmux https://hitmux.top](https://hitmux.top)
+[![GitHub](https://img.shields.io/badge/GitHub-Hitmux/hitpag-blue)](https://github.com/Hitmux/hitpag) 
+[![Website](https://img.shields.io/badge/Website-hitmux.top-green)](https://hitmux.top)
 
-[简体中文](README_zh.md)
-
-## Introduction
-
-**`hitpag` 2.0** is a major upgrade to the intelligent command-line compression tool. Building on the core philosophy of **automatic recognition and user-friendly interaction**, version 2.0 introduces powerful new features including compression level control, multi-threading support, file filtering, performance benchmarking, and support for modern compression formats.
-
-Whether you're compressing large datasets with optimal settings, filtering specific file types, or benchmarking compression performance, `hitpag` 2.0 provides enterprise-grade functionality while maintaining its signature ease of use.
+[English](README.md) | [简体中文](README_zh.md)
 
 ---
 
-## Compilation Instructions
+## 🚀 Core Features
 
-### Environment Requirements
-
-*   **Operating System**: Linux (tested on Ubuntu 22.04 and Debian 12)
-*   **Compiler**: GCC/G++ supporting the C++17 standard
-*   **Build Tool**: CMake 3.10 or higher
-*   **Dependencies**: `stdc++fs`, `pthread` (C++ filesystem and threading libraries)
-
-### Compilation Steps
-
-1.  **Update system and install build tools**:
-    ```bash
-    sudo apt update
-    sudo apt install -y g++ cmake make
-    ```
-
-2.  **Navigate to project directory and build**:
-    ```bash
-    cd hitpag
-    mkdir -p build
-    cd build
-    cmake ..
-    make
-    ```
-
-3.  **(Optional) Install to system**:
-    ```bash
-    sudo make install
-    ```
-
-### System Dependencies
-
-Install all supported compression tools:
+### 🧠 Intelligent File Type Recognition
+- **Magic Number Detection**: Analyzes file headers to automatically identify real formats, independent of extensions
+- **Handles Problem Files**: Supports files without extensions or with incorrect extensions
+- **Format Override**: `--format` option for manual format specification when detection fails
 
 ```bash
-# Essential compression tools
-sudo apt install -y tar gzip bzip2 xz-utils zip unzip rar unrar p7zip-full
+# Auto-detect even without file extension
+hitpag mystery_file ./output/
 
-# Modern compression formats (optional)
-sudo apt install -y lz4 zstd xar
+# Handle files with wrong extensions (actually 7z but named .zip)
+hitpag fake.zip ./extracted/      # Auto-detects as 7z format
+
+# Manual format specification
+hitpag --format=rar problem_archive ./output/
 ```
 
----
-
-## Usage Instructions
-
-### Basic Syntax
+### ⚡ High-Performance Compression
+- **Multi-threading Support**: Auto-detects CPU cores for parallel compression speedup
+- **Compression Level Control**: Fine-tune compression ratio vs speed with 1-9 levels
+- **Modern Algorithm Support**: LZ4 ultra-fast, Zstandard high-efficiency
 
 ```bash
-hitpag [options] source_path destination_path
+# Multi-threaded high-performance compression
+hitpag -l9 -t8 --benchmark data.tar.gz ./large_files/
+
+# Ultra-fast compression (suitable for temporary files)
+hitpag --format=lz4 temp.lz4 ./temp_data/
+
+# High-efficiency modern compression
+hitpag --format=zstd archive.zstd ./documents/
 ```
 
-### New Command-line Options (Version 2.0)
+### 🎯 Precise File Filtering
+- **Regex Support**: Powerful include/exclude pattern matching
+- **Combined Filtering**: Flexible multi-condition combinations for precise content control
 
-*   **`-i`**: Interactive mode with enhanced format selection
-*   **`-p[password]`**: Password encryption/decryption
-*   **`-l[level]`**: Compression level (1-9, format-dependent defaults)
-*   **`-t[threads]`**: Thread count for parallel processing (auto-detect if not specified)
-*   **`--verbose`**: Detailed progress and operation information
-*   **`--benchmark`**: Performance statistics including compression ratios and timing
-*   **`--verify`**: Archive integrity verification after compression
-*   **`--exclude=PATTERN`**: Exclude files/directories matching regex pattern
-*   **`--include=PATTERN`**: Include only files/directories matching regex pattern
-*   **`-h, --help`**: Display comprehensive help information
-*   **`-v, --version`**: Show version information
-*   **Note**: There is a difference between `hitpag xxx/ file.zip` and `hitpag xxx file.zip`, which should not be difficult to understand. The same is true for `hitapg file.zip xxx/` and `hitpag file.zip xxx/`.
-
-### Advanced Usage Examples
-
-1.  **High-performance compression with optimal settings**:
-    ```bash
-    hitpag -l9 -t4 --benchmark large_dataset.tar.gz ./data/
-    ```
-    Compress with maximum compression level using 4 threads and show performance statistics.
-
-2.  **Filtered compression with file type selection**:
-    ```bash
-    hitpag --include='*.cpp' --include='*.h' --exclude='build/*' source_code.7z ./project/
-    ```
-    Compress only C++ source files, excluding build directories.
-
-3.  **Encrypted compression with verification**:
-    ```bash
-    hitpag -pmysecret --verify --verbose confidential.zip ./sensitive_data/
-    ```
-    Password-encrypt with integrity verification and detailed output.
-
-4.  **Modern compression formats**:
-    ```bash
-    hitpag -l6 -t8 fast_archive.lz4 ./temp_files/
-    hitpag -l9 small_archive.zstd ./documents/
-    ```
-    Use LZ4 for speed or Zstandard for optimal compression.
-
-5.  **Batch processing with performance monitoring**:
-    ```bash
-    hitpag --benchmark --exclude='*.tmp' --exclude='*.log' backup.tar.xz ./work_folder/
-    ```
-    Create compressed backup excluding temporary files with performance analysis.
-
-### Supported Compression Formats
-
-`hitpag` 2.0 supports all traditional formats plus modern compression algorithms:
-
-**Traditional formats:**
-*   `tar` (uncompressed)
-*   `tar.gz` / `tgz` (gzip compression)
-*   `tar.bz2` / `tbz2` (bzip2 compression)
-*   `tar.xz` / `txz` (xz compression)
-*   `zip` (supports passwords and compression levels)
-*   `rar` (decompression only)
-*   `7z` (supports passwords and compression levels)
-
-**Modern formats (new in 2.0):**
-*   `lz4` (ultra-fast compression/decompression)
-*   `zst` / `zstd` (Facebook's Zstandard - excellent compression/speed balance)
-*   `xar` (macOS archive format)
-
-### Performance Features
-
-#### Multi-threading Support
-Automatically detects CPU cores and utilizes parallel processing for supported formats:
 ```bash
-hitpag -t8 archive.tar.gz ./large_directory/  # Use 8 threads explicitly
-hitpag -t archive.tar.gz ./large_directory/   # Auto-detect optimal thread count
-```
-
-#### Compression Level Control
-Fine-tune compression vs. speed trade-offs:
-```bash
-hitpag -l1 fast.zip ./files/      # Fastest compression
-hitpag -l6 balanced.7z ./files/   # Balanced (default for most formats)
-hitpag -l9 smallest.tar.xz ./files/ # Maximum compression
-```
-
-#### File Filtering
-Advanced pattern matching for selective compression:
-```bash
-# Include only specific file types
-hitpag --include='*.jpg' --include='*.png' photos.zip ./images/
+# Compress only source code files
+hitpag --include='*.cpp' --include='*.h' --include='*.py' code.7z ./project/
 
 # Exclude temporary and build files
-hitpag --exclude='*.tmp' --exclude='node_modules/*' --exclude='build/*' clean_backup.tar.gz ./project/
-
-# Complex filtering combinations
-hitpag --include='src/*' --exclude='*.o' --exclude='*.obj' source_only.7z ./project/
+hitpag --exclude='*.tmp' --exclude='build/*' --exclude='node_modules/*' clean.tar.gz ./project/
 ```
 
-#### Performance Benchmarking
-Comprehensive performance analysis:
+### 📊 Performance Monitoring & Verification
+- **Benchmarking**: Detailed statistics on compression ratio, time, thread utilization
+- **Integrity Verification**: Automatic archive verification after compression
+- **Verbose Output**: Real-time progress and operation information
+
 ```bash
+# Performance analysis
 hitpag --benchmark --verbose optimized.tar.xz ./data/
+
+# Critical data compression with verification
+hitpag --verify --benchmark important.7z ./critical_files/
 ```
-Outputs:
-- Compression time
-- Original vs compressed size
-- Compression ratio percentage
-- Thread utilization information
 
----
-
-## Error Handling
-
-Enhanced error reporting with detailed diagnostics:
-
-*   **`Error: Compression level must be between 1-9`**: Invalid compression level specified
-*   **`Error: Thread count must be positive`**: Invalid thread count parameter
-*   **`Error: Required tool not found: lz4`**: Missing compression utility
-*   **`Filtering files: included 150, excluded 45`**: File filtering summary
-*   **`Archive verification failed`**: Integrity check unsuccessful
-
----
-
-## Version 2.0 Changelog
-
-### New Features
-- **Multi-threading support** for parallel compression/decompression
-- **Compression level control** (1-9) for all supported formats
-- **File filtering system** with regex pattern matching
-- **Performance benchmarking** with detailed statistics
-- **Archive verification** for integrity checking
-- **Modern compression formats**: LZ4, Zstandard, XAR
-- **Enhanced verbose mode** with detailed progress information
-
-### Improvements
-- **Modular architecture** with organized namespaces
-- **Better error handling** with specific error codes
-- **International message system** for easy localization
-- **Enhanced interactive mode** with new format options
-- **Improved help system** with comprehensive examples
-
-### Technical Enhancements
-- **C++17 threading support** using `std::thread`
-- **Regex-based filtering** using `std::regex`
-- **Performance monitoring** with `std::chrono`
-- **Memory-efficient processing** for large files
-- **Cross-platform compatibility** improvements
-
----
-
-## Migration from 1.x
-
-Version 2.0 maintains full backward compatibility with 1.x command syntax. All existing scripts and workflows will continue to work unchanged, while new features can be adopted incrementally.
+### 🔐 Secure Encryption Protection
+- **Password Protection**: Supports password encryption for ZIP and 7Z formats
+- **Interactive Input**: Secure password input with no echo
 
 ```bash
-# 1.x syntax still works
-hitpag archive.tar.gz ./extracted_dir
+# Password-protected compression
+hitpag -pmysecret secure.7z ./sensitive_data/
 
-# Enhanced 2.0 syntax adds powerful options
-hitpag --benchmark --verbose -l9 -t4 archive.tar.gz ./extracted_dir
+# Interactive password input
+hitpag -p confidential.zip ./private_files/
 ```
+
+### 🎨 User-Friendly Interface
+- **Interactive Mode**: Wizard-style operation for command-line beginners
+- **Smart Detection**: Auto-detects operation type (compress/decompress)
+- **Comprehensive Help**: Rich examples and documentation
+
+```bash
+# Launch interactive mode
+hitpag -i
+
+# Get help
+hitpag --help
+```
+
+---
+
+## 📦 Supported Formats
+
+### Traditional Formats
+- **TAR Series**: tar, tar.gz, tar.bz2, tar.xz
+- **ZIP**: Full support including password protection
+- **7Z**: Highest compression ratio with password support
+- **RAR**: Decompression support
+
+### Modern Formats
+- **LZ4**: Ultra-fast compression/decompression for real-time scenarios
+- **Zstandard (zstd)**: Facebook-developed, best balance of compression ratio and speed
+- **XAR**: macOS native format
+
+---
+
+## 🛠️ Quick Start
+
+### Install Dependencies
+```bash
+# Ubuntu/Debian
+sudo apt install -y tar gzip bzip2 xz-utils zip unzip p7zip-full lz4 zstd
+
+# Optional tools
+sudo apt install -y rar unrar xar
+```
+
+### Build & Install
+```bash
+git clone https://github.com/Hitmux/hitpag.git
+cd hitpag
+mkdir build && cd build
+cmake ..
+make
+sudo make install  # optional
+```
+
+### Basic Usage
+```bash
+# Auto-detect operation
+hitpag archive.tar.gz ./extracted/    # decompress
+hitpag ./folder/ backup.zip            # compress
+
+# Advanced features
+hitpag -l9 -t4 --benchmark big_data.tar.xz ./data/
+hitpag --format=7z --verbose mystery_file ./output/
+```
+
+---
+
+## 💡 Use Cases
+
+### 🏢 Enterprise Backup
+```bash
+# Efficient backup excluding temporary files
+hitpag --benchmark --exclude='*.tmp' --exclude='*.log' \
+       -l9 -t8 enterprise_backup.tar.xz ./company_data/
+```
+
+### 👨‍💻 Development Project Compression
+```bash
+# Package only source code
+hitpag --include='*.cpp' --include='*.h' --include='*.py' \
+       --exclude='build/*' source_code.7z ./project/
+```
+
+### 🔒 Secure File Transfer
+```bash
+# Encrypted compression of sensitive files
+hitpag -p --verify --benchmark secure_transfer.7z ./confidential/
+```
+
+### ⚡ Quick Temporary Compression
+```bash
+# Ultra-fast compression of temporary files
+hitpag --format=lz4 temp_backup.lz4 ./temp_work/
+```
+
+### 🎯 Problem File Handling
+```bash
+# Handle files with wrong extensions or no extensions
+hitpag downloaded_archive ./extracted/           # auto-detect format
+hitpag --format=rar unknown_format ./output/     # force specific format
+```
+
+---
+
+## 📝 Command Reference
+
+### Basic Options
+- **`-i`** - Interactive mode
+- **`-p[password]`** - Password protection
+- **`-l[1-9]`** - Compression level
+- **`-t[count]`** - Thread count
+- **`--format=type`** - Force format
+
+### Advanced Options
+- **`--verbose`** - Detailed output
+- **`--benchmark`** - Performance statistics
+- **`--verify`** - Integrity verification
+- **`--exclude=pattern`** - Exclude files
+- **`--include=pattern`** - Include files
+
+### Example Commands
+```bash
+# Intelligent recognition
+hitpag file.7z ./output/
+
+# High-performance compression
+hitpag -l9 -t8 --benchmark archive.tar.xz ./data/
+
+# Precise filtering
+hitpag --include='*.cpp' --exclude='build/*' code.7z ./project/
+
+# Secure encryption
+hitpag -p --verify secure.7z ./sensitive/
+
+# Format specification
+hitpag --format=zip --verbose unknown_file ./extracted/
+```
+
+---
+
+## 🔍 Troubleshooting
+
+### Common Issues
+1. **Recognition Failed**: Use `--format` to specify manually
+2. **Permission Error**: Check file/directory permissions
+3. **Missing Tool**: Install corresponding compression tool
+4. **Out of Memory**: Reduce thread count or compression level
+
+### Error Codes
+- `Error: Invalid format specified` - Format parameter error
+- `Error: Required tool not found` - Missing compression tool
+- `Error: Source path does not exist` - Source file not found
+
+---
+
+## 📈 Version History
+
+### 2.0.2 - Latest Release
+**Bug Fixes & Improvements**
+- Enhanced file header detection with better boundary checking
+- Improved memory safety and error handling
+- Better terminal settings restoration for password input
+- More robust parameter validation
+- Fixed edge cases in file type recognition
+
+### 2.0.0 - Major Update
+**New Features**
+- Intelligent file header detection system
+- Manual format override (--format option)
+- Multi-threaded parallel processing
+- Modern compression format support (LZ4, Zstandard)
+- File filtering system
+- Performance benchmarking
+
+**Improvements**
+- Enhanced error handling
+- Better user interface
+- Memory safety enhancements
+- Cross-platform compatibility
+
+**Fixes**
+- File header detection boundary checks
+- Terminal settings restoration
+- Parameter validation improvements
+
+---
+
+## 🤝 Contributing
+
+Welcome to contribute code, report bugs, or suggest features!
+
+- 📝 [Submit Issue](https://github.com/Hitmux/hitpag/issues)
+- 🔧 [Submit PR](https://github.com/Hitmux/hitpag/pulls)
+- 💬 [Discussions](https://github.com/Hitmux/hitpag/discussions)
+
+---
+
+## 📄 License
+
+This project is licensed under [GNU Affero General Public License v3.0](LICENSE).
+
+---
+
+**Developer**: [Hitmux](https://hitmux.top) | **Project**: [GitHub](https://github.com/Hitmux/hitpag)

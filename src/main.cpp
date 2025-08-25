@@ -66,7 +66,7 @@
 namespace fs = std::filesystem;
 
 // [NEW] Application constants for easy maintenance and display.
-constexpr std::string_view APP_VERSION = "2.0.0";
+constexpr std::string_view APP_VERSION = "2.0.2";
 constexpr std::string_view APP_WEBSITE = "https://hitmux.top";
 constexpr std::string_view APP_GITHUB = "https://github.com/Hitmux/hitpag";
 
@@ -99,6 +99,7 @@ namespace i18n {
         {"help_include", "  --include=PATTERN  Include only files/directories matching pattern"},
         {"help_benchmark", "  --benchmark     Show compression performance statistics"},
         {"help_verify", "  --verify        Verify archive integrity after compression"},
+        {"help_format", "  --format=TYPE   Force archive type (zip, 7z, tar.gz, tar.bz2, tar.xz, rar, lz4, zstd, xar)"},
         {"help_h", "  -h, --help      Display help information"},
         {"help_v", "  -v, --version   Display version information"},
         {"help_examples", "Examples:"},
@@ -111,6 +112,7 @@ namespace i18n {
         {"help_example6", "  hitpag -l9 -t4 big_data.tar.gz ./data # Compress with max level using 4 threads"},
         {"help_example7", "  hitpag --verbose --benchmark ./files archive.7z # Verbose compression with benchmarking"},
         {"help_example8", "  hitpag --exclude='*.tmp' --include='*.cpp' src/ code.tar.gz # Filter files during compression"},
+        {"help_example9", "  hitpag --format=zip data.7z ./extracted # Force treat data.7z as ZIP and decompress"},
         
         // Error messages
         {"error_missing_args", "Error: Missing arguments. {ADDITIONAL_INFO}"},
@@ -276,6 +278,7 @@ namespace args {
         bool verify = false;
         std::vector<std::string> exclude_patterns;
         std::vector<std::string> include_patterns;
+        std::string force_format; // Manual format specification
     };
     
     Options parse(int argc, char* argv[]) {
@@ -339,7 +342,8 @@ namespace args {
                         error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Invalid thread count"}});
                     }
                 } else {
-                    options.thread_count = std::thread::hardware_concurrency(); // Auto-detect
+                    unsigned int hw_threads = std::thread::hardware_concurrency();
+                    options.thread_count = (hw_threads > 0) ? hw_threads : 1; // Fallback to 1 if detection fails
                 }
                 i++;
             } else if (opt == "--verbose") {
@@ -356,6 +360,13 @@ namespace args {
                 i++;
             } else if (opt.rfind("--include=", 0) == 0) {
                 options.include_patterns.push_back(opt.substr(10));
+                i++;
+            } else if (opt.rfind("--format=", 0) == 0) {
+                std::string format_value = opt.substr(9);
+                if (format_value.empty()) {
+                    error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "--format requires a value"}});
+                }
+                options.force_format = format_value;
                 i++;
             } else {
                  error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Unknown option: " + opt}});
@@ -393,14 +404,14 @@ namespace args {
             {"-i", "help_i"}, {"-p", "help_p"}, {"-l", "help_l"}, {"-t", "help_t"}, 
             {"--verbose", "help_verbose"}, {"--exclude", "help_exclude"}, 
             {"--include", "help_include"}, {"--benchmark", "help_benchmark"}, 
-            {"--verify", "help_verify"}, {"-h", "help_h"}, {"-v", "help_v"}
+            {"--verify", "help_verify"}, {"--format", "help_format"}, {"-h", "help_h"}, {"-v", "help_v"}
         };
         for(const auto& opt : help_options) std::cout << i18n::get(opt.key) << std::endl;
 
         std::cout << std::endl << i18n::get("help_examples") << std::endl;
         const std::vector<std::string> example_keys = {
             "help_example1", "help_example2", "help_example_new_path", "help_example3", 
-            "help_example4", "help_example5", "help_example6", "help_example7", "help_example8"
+            "help_example4", "help_example5", "help_example6", "help_example7", "help_example8", "help_example9"
         };
         for(const auto& key : example_keys) std::cout << i18n::get(key) << std::endl;
     }
@@ -464,23 +475,93 @@ namespace file_type {
     FileType recognize_by_header(const std::string& path) {
         std::ifstream file(path, std::ios::binary);
         if (!file) return FileType::UNKNOWN;
-        std::array<char, 8> header{}; 
+        std::array<char, 16> header{}; 
         file.read(header.data(), header.size());
         if(file.gcount() < 4) return FileType::UNKNOWN; 
 
-        if (header[0] == 0x50 && header[1] == 0x4B) return FileType::ARCHIVE_ZIP; // PK..
-        if (header[0] == 0x52 && header[1] == 0x61 && header[2] == 0x72 && header[3] == 0x21) return FileType::ARCHIVE_RAR; // Rar!
-        if (header[0] == 0x37 && header[1] == 0x7A && header[2] == (char)0xBC && header[3] == (char)0xAF) return FileType::ARCHIVE_7Z; // 7z..
-        if (header[0] == (char)0x1F && header[1] == (char)0x8B) return FileType::ARCHIVE_TAR_GZ; // Gzip magic
-        if (header[0] == 0x42 && header[1] == 0x5A && header[2] == 0x68) return FileType::ARCHIVE_TAR_BZ2; // BZh
-        if (header[0] == (char)0xFD && header[1] == 0x37 && header[2] == 0x7A && header[3] == 0x58 && file.gcount() >= 6 && header[4] == 0x5A && header[5] == 0x00) return FileType::ARCHIVE_TAR_XZ; // .7zX...
+        // ZIP archives (PK signature, but check if it's really ZIP vs other PK-based formats)
+        if (header[0] == 0x50 && header[1] == 0x4B) {
+            // Check specific ZIP signatures
+            if ((header[2] == 0x03 && header[3] == 0x04) ||  // Local file header
+                (header[2] == 0x05 && header[3] == 0x06) ||  // End central directory
+                (header[2] == 0x01 && header[3] == 0x02)) {  // Central directory file header
+                return FileType::ARCHIVE_ZIP;
+            }
+        }
+        
+        // RAR archives
+        if (header[0] == 0x52 && header[1] == 0x61 && header[2] == 0x72 && header[3] == 0x21) {
+            return FileType::ARCHIVE_RAR; // Rar!
+        }
+        
+        // 7Z archives
+        if (file.gcount() >= 6 && header[0] == 0x37 && header[1] == 0x7A && header[2] == (char)0xBC && header[3] == (char)0xAF && 
+            header[4] == 0x27 && header[5] == 0x1C) {
+            return FileType::ARCHIVE_7Z;
+        }
+        
+        // GZIP files (could be .tar.gz or standalone .gz)
+        if (header[0] == (char)0x1F && header[1] == (char)0x8B) {
+            return FileType::ARCHIVE_TAR_GZ; // Default to tar.gz, could be refined further
+        }
+        
+        // BZIP2 files
+        if (header[0] == 0x42 && header[1] == 0x5A && header[2] == 0x68) {
+            return FileType::ARCHIVE_TAR_BZ2; // BZh
+        }
+        
+        // XZ files
+        if (file.gcount() >= 6 && header[0] == (char)0xFD && header[1] == 0x37 && header[2] == 0x7A && 
+            header[3] == 0x58 && header[4] == 0x5A && header[5] == 0x00) {
+            return FileType::ARCHIVE_TAR_XZ; // .7zXZ..
+        }
+        
+        // LZ4 files
+        if (header[0] == 0x04 && header[1] == 0x22 && header[2] == 0x4D && header[3] == 0x18) {
+            return FileType::ARCHIVE_LZ4;
+        }
+        
+        // ZSTD files
+        if ((header[0] == 0x28 && header[1] == (char)0xB5 && header[2] == 0x2F && header[3] == (char)0xFD) ||
+            (header[0] == 0x22 && header[1] == (char)0xB5 && header[2] == 0x2F && header[3] == (char)0xFD)) {
+            return FileType::ARCHIVE_ZSTD;
+        }
 
         // TAR archives have "ustar" at byte offset 257
         file.clear(); 
         file.seekg(257);
         std::array<char, 6> tar_header{}; 
         file.read(tar_header.data(), tar_header.size());
-        if (file.gcount() >= 5 && std::string(tar_header.data(), 5) == "ustar") return FileType::ARCHIVE_TAR;
+        if (file.gcount() >= 5 && std::string(tar_header.data(), 5) == "ustar") {
+            return FileType::ARCHIVE_TAR;
+        }
+        
+        // Check for old TAR format (may not have ustar signature)
+        file.clear();
+        file.seekg(0);
+        std::array<char, 512> tar_block{};
+        file.read(tar_block.data(), tar_block.size());
+        if (file.gcount() >= 512) {
+            // Check if looks like TAR header (filename in first 100 bytes, checksum calculation)
+            bool looks_like_tar = true;
+            bool has_filename = false;
+            
+            // Check if there's at least one non-null character in filename field
+            for (int i = 0; i < 100; ++i) {
+                if (tar_block[i] != 0) {
+                    has_filename = true;
+                    // Check if character is printable
+                    if (tar_block[i] < 32 || tar_block[i] > 126) {
+                        looks_like_tar = false;
+                        break;
+                    }
+                }
+            }
+            
+            if (looks_like_tar && has_filename) {
+                return FileType::ARCHIVE_TAR;
+            }
+        }
         
         return FileType::UNKNOWN;
     }
@@ -494,9 +575,11 @@ namespace file_type {
         if (fs::is_directory(source_path_str)) return FileType::DIRECTORY;
         
         if (fs::is_regular_file(source_path_str)) {
-            FileType type = recognize_by_extension(source_path_str);
+            // Try header detection first (more reliable)
+            FileType type = recognize_by_header(source_path_str);
             if (type == FileType::UNKNOWN) {
-                type = recognize_by_header(source_path_str);
+                // Fall back to extension if header detection fails
+                type = recognize_by_extension(source_path_str);
             }
             // If still unknown, it's just a regular file, not a known archive type.
             return (type == FileType::UNKNOWN) ? FileType::REGULAR_FILE : type;
@@ -517,8 +600,14 @@ namespace file_type {
         bool target_is_archive = (result.target_type_hint != FileType::UNKNOWN && result.target_type_hint != FileType::REGULAR_FILE && result.target_type_hint != FileType::DIRECTORY);
 
         if (result.source_type == FileType::DIRECTORY || result.source_type == FileType::REGULAR_FILE) {
-            if (target_is_archive) result.operation = OperationType::COMPRESS;
-            else error::throw_error(error::ErrorCode::UNKNOWN_FORMAT, {{"INFO", "Target for compression must have a recognized archive extension."}});
+            if (target_is_archive) {
+                result.operation = OperationType::COMPRESS;
+            } else {
+                // If no archive extension detected, we'll default to compression operation
+                // The format will be determined by --format option if provided
+                result.operation = OperationType::COMPRESS;
+                result.target_type_hint = FileType::UNKNOWN;
+            }
         } else { // Source is an archive
             result.operation = OperationType::DECOMPRESS;
             if (fs::exists(target_path_str) && !fs::is_directory(target_path_str)) {
@@ -526,7 +615,6 @@ namespace file_type {
             }
         }
         
-        if (result.operation == OperationType::UNKNOWN) error::throw_error(error::ErrorCode::UNKNOWN_FORMAT);
         return result;
     }
 
@@ -542,6 +630,24 @@ namespace file_type {
         };
         auto it = type_map.find(type);
         return it != type_map.end() ? it->second : "Unknown";
+    }
+
+    FileType parse_format_string(const std::string& format_str) {
+        std::string fmt = format_str;
+        std::transform(fmt.begin(), fmt.end(), fmt.begin(), [](unsigned char c){ return std::tolower(c); });
+        
+        if (fmt == "zip") return FileType::ARCHIVE_ZIP;
+        if (fmt == "7z") return FileType::ARCHIVE_7Z;
+        if (fmt == "tar") return FileType::ARCHIVE_TAR;
+        if (fmt == "tar.gz" || fmt == "tgz") return FileType::ARCHIVE_TAR_GZ;
+        if (fmt == "tar.bz2" || fmt == "tbz2") return FileType::ARCHIVE_TAR_BZ2;
+        if (fmt == "tar.xz" || fmt == "txz") return FileType::ARCHIVE_TAR_XZ;
+        if (fmt == "rar") return FileType::ARCHIVE_RAR;
+        if (fmt == "lz4") return FileType::ARCHIVE_LZ4;
+        if (fmt == "zstd" || fmt == "zst") return FileType::ARCHIVE_ZSTD;
+        if (fmt == "xar") return FileType::ARCHIVE_XAR;
+        
+        return FileType::UNKNOWN;
     }
 }
 
@@ -881,7 +987,12 @@ namespace operation {
                 progress::set_original_size(progress::calculate_directory_size(canonical_source.string()));
             } else {
                 std::error_code ec;
-                progress::set_original_size(fs::file_size(canonical_source, ec));
+                auto size = fs::file_size(canonical_source, ec);
+                if (!ec) {
+                    progress::set_original_size(size);
+                } else {
+                    progress::set_original_size(0); // Fallback if size cannot be determined
+                }
             }
             progress::set_thread_count(options.thread_count > 0 ? options.thread_count : 1);
         }
@@ -978,7 +1089,10 @@ namespace operation {
             progress::end_operation();
             std::error_code ec;
             if (fs::exists(target_path_str)) {
-                progress::set_compressed_size(fs::file_size(target_path_str, ec));
+                auto size = fs::file_size(target_path_str, ec);
+                if (!ec) {
+                    progress::set_compressed_size(size);
+                }
             }
         }
         
@@ -1140,10 +1254,26 @@ namespace interactive {
         }
 #else
         termios oldt, newt;
-        tcgetattr(STDIN_FILENO, &oldt);
+        if (tcgetattr(STDIN_FILENO, &oldt) != 0) {
+            // Failed to get terminal attributes, fallback to regular input
+            std::getline(std::cin, password);
+            return password;
+        }
+        
         newt = oldt;
         newt.c_lflag &= ~(ECHO | ICANON); // Disable echoing and canonical mode
-        tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+        if (tcsetattr(STDIN_FILENO, TCSANOW, &newt) != 0) {
+            // Failed to set terminal attributes, fallback to regular input
+            std::getline(std::cin, password);
+            return password;
+        }
+        
+        // Use RAII to ensure terminal settings are restored
+        struct TerminalRestorer {
+            const termios& old_settings;
+            TerminalRestorer(const termios& old) : old_settings(old) {}
+            ~TerminalRestorer() { tcsetattr(STDIN_FILENO, TCSANOW, &old_settings); }
+        } restorer(oldt);
         
         char ch;
         while (read(STDIN_FILENO, &ch, 1) == 1 && ch != '\n') {
@@ -1157,7 +1287,7 @@ namespace interactive {
                 std::cout << '*' << std::flush;
             }
         }
-        tcsetattr(STDIN_FILENO, TCSANOW, &oldt); // Restore terminal settings
+        // Terminal will be restored automatically by destructor
 #endif
         std::cout << std::endl;
         return password;
@@ -1327,6 +1457,28 @@ int main(int argc, char* argv[]) {
             }
 
             file_type::RecognitionResult result = file_type::recognize(options.source_path, options.target_path);
+            
+            // Override target format if manually specified
+            if (!options.force_format.empty()) {
+                file_type::FileType forced_type = file_type::parse_format_string(options.force_format);
+                if (forced_type == file_type::FileType::UNKNOWN) {
+                    error::throw_error(error::ErrorCode::UNKNOWN_FORMAT, {{"INFO", "Invalid format specified: " + options.force_format}});
+                }
+                
+                // For compression, override the target format
+                if (result.operation == file_type::OperationType::COMPRESS) {
+                    result.target_type_hint = forced_type;
+                } else {
+                    // For decompression, override the source type detection
+                    result.source_type = forced_type;
+                }
+            }
+            
+            // Check if we need format specification for compression
+            if (result.operation == file_type::OperationType::COMPRESS && 
+                result.target_type_hint == file_type::FileType::UNKNOWN) {
+                error::throw_error(error::ErrorCode::UNKNOWN_FORMAT, {{"INFO", "Target format could not be determined. Please specify --format or use archive extension in target path."}});
+            }
             
             if (result.operation == file_type::OperationType::COMPRESS) {
                 operation::compress(options.source_path, options.target_path, result.target_type_hint, options.password, options);
