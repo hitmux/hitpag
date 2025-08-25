@@ -76,6 +76,7 @@ hitpag [options] source_path destination_path
 *   **`--include=PATTERN`**: Include only files/directories matching regex pattern
 *   **`-h, --help`**: Display comprehensive help information
 *   **`-v, --version`**: Show version information
+*   **Note**: There is a difference between `hitpag xxx/ file.zip` and `hitpag xxx file.zip`, which should not be difficult to understand. The same is true for `hitapg file.zip xxx/` and `hitpag file.zip xxx/`.
 
 ### Advanced Usage Examples
 
