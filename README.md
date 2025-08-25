@@ -2,7 +2,7 @@
 
 ## [Hitmux Official Website https://hitmux.top](https://hitmux.top)
 
-[简体中文](README.md)
+[简体中文](README_zh.md)
 
 ## Introduction
 
