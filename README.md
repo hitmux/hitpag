@@ -1,7 +1,5 @@
 # Hirmux `hitpag` 2.0 - Advanced Compression Tool
 
-## [Hitmux Official Website https://hitmux.top](https://hitmux.top)
-
 [简体中文](README_zh.md)
 
 ## Introduction
