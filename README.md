@@ -2,6 +2,8 @@
 
 ## [Hitmux Official Website https://hitmux.top](https://hitmux.top)
 
+[简体中文](README.md)
+
 ## Introduction
 
 **`hitpag` 2.0** is a major upgrade to the intelligent command-line compression tool. Building on the core philosophy of **automatic recognition and user-friendly interaction**, version 2.0 introduces powerful new features including compression level control, multi-threading support, file filtering, performance benchmarking, and support for modern compression formats.
