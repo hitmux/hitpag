@@ -281,4 +281,4 @@ hitpag --format=zip --verbose unknown_file ./extracted/
 
 ---
 
-**开发者**: [Hitmux](https://hitmux.top) |
+**开发者**: [Hitmux](https://hitmux.top)
