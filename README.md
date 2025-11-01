@@ -1,4 +1,4 @@
-# hitpag 2.0.2 - The Intelligent Compression Tool
+# hitpag 2.0.3 - The Intelligent Compression Tool
 
 **An intelligent, powerful, and easy-to-use next-generation command-line compression tool**
 
@@ -237,7 +237,16 @@ hitpag --format=zip --verbose unknown_file ./extracted/
 
 ## 📈 Version History
 
-### 2.0.2 - Latest Version
+### 2.0.3 - Latest Version
+**New Features**
+- Added an overwrite/cancel/rename confirmation flow with intelligent default suggestions (`_1`, `_2`, ...).
+- CLI now supports compressing multiple sources in a single run (e.g., via shell wildcards) with automatic common-path handling.
+
+**Improvements**
+- Default rename suggestions now auto-increment when conflicts persist.
+- Strengthened target path validation to prevent accidental self-overwrites.
+
+### 2.0.2
 **Bug Fixes & Improvements**
 - Enhanced file header detection with improved boundary checks.
 - Improved memory safety and error handling.

@@ -51,6 +51,8 @@
 #include <thread>    // For multi-threading support
 #include <regex>     // For file pattern matching
 
+#include "target_conflict.h"
+
 // Platform-specific includes for process management and terminal control
 #ifdef _WIN32
 #include <windows.h>
@@ -65,8 +67,19 @@
 
 namespace fs = std::filesystem;
 
+namespace util {
+    std::string trim_copy(const std::string& value) {
+        const auto first = value.find_first_not_of(" \t\n\r");
+        if (first == std::string::npos) {
+            return "";
+        }
+        const auto last = value.find_last_not_of(" \t\n\r");
+        return value.substr(first, last - first + 1);
+    }
+}
+
 // [NEW] Application constants for easy maintenance and display.
-constexpr std::string_view APP_VERSION = "2.0.2";
+constexpr std::string_view APP_VERSION = "2.0.3";
 constexpr std::string_view APP_WEBSITE = "https://hitmux.top";
 constexpr std::string_view APP_GITHUB = "https://github.com/Hitmux/hitpag";
 
@@ -162,6 +175,18 @@ namespace i18n {
         {"operation_canceled", "Operation canceled"},
         {"warning_tar_password", "Warning: Password protection is not supported for tar formats. The password will be ignored."},
         {"filtering_files", "Filtering files: included {INCLUDED}, excluded {EXCLUDED}"},
+        {"target_exists_header", "Target {OBJECT_TYPE} '{TARGET_PATH}' already exists."},
+        {"target_exists_options", "Choose action: [O]verwrite / [C]ancel / [R]ename"},
+        {"target_exists_choice_prompt", "Choice (o/c/r): "},
+        {"target_exists_invalid", "Invalid choice, please enter o, c, or r."},
+        {"target_exists_rename_prompt", "Enter a new target path (default: {DEFAULT}): "},
+        {"target_exists_empty", "Target path cannot be empty."},
+        {"target_exists_same", "New target path matches the current path. Please choose a different value."},
+        {"target_exists_remove_failed", "Failed to remove existing target '{TARGET_PATH}': {REASON}"},
+        {"target_exists_keep_directory", "Proceeding without deleting the existing directory. Existing files may be overwritten."},
+        {"target_exists_rename_conflict", "Path '{TARGET_PATH}' already exists. You may overwrite it or choose a different name."},
+        {"target_exists_object_file", "file"},
+        {"target_exists_object_directory", "directory"},
     };
     
     /**
@@ -199,6 +224,167 @@ namespace i18n {
             }
         }
         return message_template;
+    }
+}
+
+namespace cli_io {
+    std::string get_input() {
+        std::string input;
+        if (!std::getline(std::cin, input)) {
+            throw std::runtime_error(i18n::get("error_input_stream_closed"));
+        }
+        return util::trim_copy(input);
+    }
+}
+
+namespace target_path {
+    using InputFn = std::function<std::string()>;
+    using OutputFn = std::function<void(const std::string&)>;
+
+    namespace {
+        std::string generate_sequential_candidate(const std::string& base_path, int suffix_index) {
+            fs::path original(base_path);
+            fs::path parent = original.parent_path();
+            std::string filename = original.filename().string();
+
+            static const std::vector<std::string> multi_extensions = {
+                ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".tar.lz4"
+            };
+
+            std::string stem;
+            std::string extension;
+
+            for (const auto& ext : multi_extensions) {
+                if (filename.size() > ext.size() &&
+                    filename.compare(filename.size() - ext.size(), ext.size(), ext) == 0) {
+                    stem = filename.substr(0, filename.size() - ext.size());
+                    extension = ext;
+                    break;
+                }
+            }
+
+            if (stem.empty()) {
+                auto pos = filename.find_last_of('.');
+                if (pos == std::string::npos || pos == 0) {
+                    stem = filename;
+                } else {
+                    stem = filename.substr(0, pos);
+                    extension = filename.substr(pos);
+                }
+            }
+
+            if (stem.empty() || stem == "." || stem == "..") {
+                stem = "target";
+            }
+
+            std::string suffixed_name = stem + "_" + std::to_string(suffix_index) + extension;
+
+            fs::path combined = parent / suffixed_name;
+            return combined.string();
+        }
+    } // namespace
+
+    bool resolve_existing_target(std::string& target_path,
+                                 const InputFn& input_fn,
+                                 const OutputFn& output_fn,
+                                 const OutputFn& error_fn) {
+        const std::string original_target = target_path;
+        std::string rename_base = original_target;
+        int suffix_counter = 1;
+
+        while (fs::exists(target_path)) {
+            const bool is_dir = fs::is_directory(target_path);
+            const std::string object_label = i18n::get(
+                is_dir ? "target_exists_object_directory" : "target_exists_object_file");
+
+            const std::string header = i18n::get("target_exists_header", {
+                {"TARGET_PATH", target_path},
+                {"OBJECT_TYPE", object_label}
+            });
+
+            const std::string options_line = i18n::get("target_exists_options");
+            const std::string choice_prompt = i18n::get("target_exists_choice_prompt");
+            const std::string invalid_choice_line = i18n::get("target_exists_invalid");
+
+            const auto action = target_conflict::prompt_action(
+                output_fn,
+                input_fn,
+                header,
+                options_line,
+                choice_prompt,
+                invalid_choice_line
+            );
+
+            if (action == target_conflict::Action::Overwrite) {
+                if (is_dir) {
+                    output_fn(i18n::get("target_exists_keep_directory") + "\n");
+                    break;
+                }
+
+                std::error_code ec;
+                fs::remove(target_path, ec);
+                if (ec) {
+                    error_fn(i18n::get("target_exists_remove_failed", {
+                        {"TARGET_PATH", target_path},
+                        {"REASON", ec.message()}
+                    }) + "\n");
+                    continue;
+                }
+                break;
+            }
+
+            if (action == target_conflict::Action::Cancel) {
+                return false;
+            }
+
+            // Rename flow
+            while (true) {
+                std::string default_candidate = generate_sequential_candidate(rename_base, suffix_counter);
+                std::string candidate = target_conflict::prompt_new_path(
+                    output_fn,
+                    input_fn,
+                    i18n::get("target_exists_rename_prompt", {{"DEFAULT", default_candidate}}),
+                    default_candidate
+                );
+                candidate = util::trim_copy(candidate);
+
+                if (candidate.empty()) {
+                    candidate = default_candidate;
+                }
+
+                if (candidate == target_path) {
+                    error_fn(i18n::get("target_exists_same") + "\n");
+                    if (candidate == default_candidate) {
+                        ++suffix_counter;
+                    }
+                    continue;
+                }
+
+                if (fs::exists(candidate)) {
+                    error_fn(i18n::get("target_exists_rename_conflict", {
+                        {"TARGET_PATH", candidate}
+                    }) + "\n");
+                    if (candidate == default_candidate) {
+                        ++suffix_counter;
+                    } else {
+                        rename_base = candidate;
+                        suffix_counter = 1;
+                    }
+                    continue;
+                }
+
+                target_path = candidate;
+                if (candidate == default_candidate) {
+                    ++suffix_counter;
+                } else {
+                    rename_base = candidate;
+                    suffix_counter = 1;
+                }
+                break;
+            }
+        }
+
+        return true;
     }
 }
 
@@ -268,6 +454,7 @@ namespace args {
         bool show_help = false;
         bool show_version = false;
         std::string source_path;
+        std::vector<std::string> source_paths;
         std::string target_path;
         std::string password;
         bool password_prompt = false;
@@ -373,15 +560,29 @@ namespace args {
             }
         }
         
-        if (i < args_vec.size()) options.source_path = args_vec[i++];
-        if (i < args_vec.size()) options.target_path = args_vec[i++];
+        std::vector<std::string> positional_args;
+        while (i < args_vec.size()) {
+            positional_args.push_back(args_vec[i++]);
+        }
 
-        if (i < args_vec.size()) {
-            error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Too many arguments"}});
+        if (!positional_args.empty()) {
+            options.target_path = positional_args.back();
+            positional_args.pop_back();
+            options.source_paths = positional_args;
+            if (!options.source_paths.empty()) {
+                options.source_path = options.source_paths.front();
+            }
+        }
+
+        if (!options.source_paths.empty() && options.target_path.empty()) {
+            error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Target path missing"}});
+        }
+        if (options.source_paths.empty() && !options.target_path.empty()) {
+            error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Source path missing"}});
         }
         
         if (!options.interactive_mode && !options.show_help && !options.show_version) {
-            if (options.source_path.empty()) error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Source path missing"}});
+            if (options.source_paths.empty()) error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Source path missing"}});
             if (options.target_path.empty()) error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Target path missing"}});
         }
         
@@ -798,6 +999,11 @@ namespace progress {
     }
 }
 namespace operation {
+    struct CompressionSource {
+        std::string path;
+        bool include_contents = false;
+    };
+
     bool is_tool_available(std::string_view tool) {
         #ifdef _WIN32
             std::string command = "where " + std::string(tool) + " > nul 2>&1";
@@ -950,50 +1156,86 @@ namespace operation {
         return result == 0;
     }
 
-    void compress(const std::string& source_path_str, const std::string& target_path_str, 
+    namespace {
+        bool is_descendant_or_same(const fs::path& base, const fs::path& target) {
+            std::error_code ec;
+            fs::path relative = fs::relative(target, base, ec);
+            if (ec) return false;
+            if (relative.empty()) return true;
+            for (const auto& part : relative) {
+                if (part == "..") {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        fs::path determine_common_base(const std::vector<fs::path>& paths) {
+            if (paths.empty()) return fs::current_path();
+            fs::path base = paths.front().parent_path();
+            if (base.empty()) base = paths.front();
+            while (!base.empty()) {
+                bool all_descendants = true;
+                for (const auto& p : paths) {
+                    if (!is_descendant_or_same(base, p)) {
+                        all_descendants = false;
+                        break;
+                    }
+                }
+                if (all_descendants) return base;
+                base = base.parent_path();
+            }
+            fs::path fallback = paths.front().root_path();
+            if (fallback.empty()) fallback = fs::current_path();
+            return fallback;
+        }
+
+        uintmax_t calculate_sources_size(const std::vector<fs::path>& canonical_sources) {
+            uintmax_t total = 0;
+            for (const auto& p : canonical_sources) {
+                std::error_code ec;
+                if (fs::is_directory(p, ec)) {
+                    total += progress::calculate_directory_size(p.string());
+                } else {
+                    auto sz = fs::file_size(p, ec);
+                    if (!ec) total += sz;
+                }
+            }
+            return total;
+        }
+    } // namespace
+
+    void compress(const std::vector<CompressionSource>& sources, const std::string& target_path_str, 
                  file_type::FileType target_format, const std::string& password,
                  const args::Options& options = {}) {
-        fs::path source_path(source_path_str);
-        fs::path canonical_source = fs::weakly_canonical(source_path);
-        
-        // Logic to handle compressing directory contents vs the directory itself.
-        // This is determined by a trailing slash on the source path.
-        fs::path item_to_archive;
-        fs::path base_dir;
-        
-        bool is_dir = fs::is_directory(canonical_source);
-        bool has_trailing_slash = !source_path_str.empty() && (source_path_str.back() == '/' || source_path_str.back() == '\\');
-
-        if (is_dir && has_trailing_slash) {
-            // User provided "my_dir/", so compress its contents.
-            // The base directory for the command is the source directory itself.
-            base_dir = canonical_source;
-            // The item to archive is everything inside it ('.').
-            item_to_archive = ".";
-        } else {
-            // User provided "my_dir" or "my_file.txt", compress the item itself.
-            // The base directory is the parent of the source.
-            item_to_archive = canonical_source.filename();
-            if (item_to_archive.empty() || item_to_archive == ".") {
-                item_to_archive = fs::path(source_path_str).filename();
-            }
-            base_dir = canonical_source.parent_path();
+        if (sources.empty()) {
+            error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "No sources provided for compression"}});
         }
+
+        std::vector<fs::path> canonical_sources;
+        canonical_sources.reserve(sources.size());
+        std::vector<bool> is_directory_flags;
+        is_directory_flags.reserve(sources.size());
+
+        for (const auto& src : sources) {
+            fs::path path_input(src.path);
+            if (!fs::exists(path_input)) {
+                error::throw_error(error::ErrorCode::INVALID_SOURCE, {{"PATH", src.path}});
+            }
+            fs::path canonical = fs::weakly_canonical(path_input);
+            canonical_sources.push_back(canonical);
+            is_directory_flags.push_back(fs::is_directory(canonical));
+        }
+
+        bool single_contents_mode = (sources.size() == 1 && sources.front().include_contents && is_directory_flags.front());
+        fs::path base_dir;
+        std::vector<std::string> items_to_archive;
+        items_to_archive.reserve(sources.size());
         
         // Start progress tracking
         if (options.benchmark) {
             progress::start_operation();
-            if (fs::is_directory(canonical_source)) {
-                progress::set_original_size(progress::calculate_directory_size(canonical_source.string()));
-            } else {
-                std::error_code ec;
-                auto size = fs::file_size(canonical_source, ec);
-                if (!ec) {
-                    progress::set_original_size(size);
-                } else {
-                    progress::set_original_size(0); // Fallback if size cannot be determined
-                }
-            }
+            progress::set_original_size(calculate_sources_size(canonical_sources));
             progress::set_thread_count(options.thread_count > 0 ? options.thread_count : 1);
         }
         
@@ -1001,9 +1243,32 @@ namespace operation {
             std::cout << i18n::get("threads_info", {{"COUNT", std::to_string(options.thread_count)}}) << std::endl;
         }
 
+        if (single_contents_mode) {
+            base_dir = canonical_sources.front();
+            items_to_archive.push_back(".");
+        } else {
+            base_dir = determine_common_base(canonical_sources);
+            for (size_t idx = 0; idx < canonical_sources.size(); ++idx) {
+                const auto& canonical = canonical_sources[idx];
+                std::error_code ec;
+                fs::path relative = fs::relative(canonical, base_dir, ec);
+                if (ec || relative.empty() || relative == ".") {
+                    fs::path fallback = canonical.filename();
+                    if (fallback.empty()) {
+                        fallback = canonical;
+                    }
+                    relative = fallback;
+                }
+                items_to_archive.push_back(relative.string());
+            }
+        }
+
         std::string tool;
         std::vector<std::string> args;
-        std::string working_dir_for_cmd = base_dir.string();
+        std::string working_dir_for_cmd = base_dir.empty() ? "" : base_dir.string();
+        if (working_dir_for_cmd.empty()) {
+            working_dir_for_cmd = fs::current_path().string();
+        }
 
         switch (target_format) {
             case file_type::FileType::ARCHIVE_TAR:
@@ -1019,9 +1284,8 @@ namespace operation {
                     if (target_format == file_type::FileType::ARCHIVE_TAR_GZ) flags = "-czf";
                     if (target_format == file_type::FileType::ARCHIVE_TAR_BZ2) flags = "-cjf";
                     if (target_format == file_type::FileType::ARCHIVE_TAR_XZ) flags = "-cJf";
-                    // tar's -C is the most reliable way to handle this.
-                    args = {flags, fs::absolute(target_path_str).string(), "-C", base_dir.string(), item_to_archive.string()};
-                    working_dir_for_cmd = ""; // Let tar's -C handle the directory change.
+                    args = {flags, fs::absolute(target_path_str).string()};
+                    args.insert(args.end(), items_to_archive.begin(), items_to_archive.end());
                 }
                 break;
             case file_type::FileType::ARCHIVE_ZIP:
@@ -1033,7 +1297,7 @@ namespace operation {
                 }
                 args.push_back("-r"); // Recurse into directories
                 args.push_back(fs::absolute(target_path_str).string());
-                args.push_back(item_to_archive.string());
+                args.insert(args.end(), items_to_archive.begin(), items_to_archive.end());
                 break;
             case file_type::FileType::ARCHIVE_7Z:
                 tool = "7z";
@@ -1044,7 +1308,7 @@ namespace operation {
                     args.push_back("-mx=" + std::to_string(options.compression_level));
                 }
                 args.push_back(fs::absolute(target_path_str).string());
-                args.push_back(item_to_archive.string());
+                args.insert(args.end(), items_to_archive.begin(), items_to_archive.end());
                 break;
             case file_type::FileType::ARCHIVE_LZ4:
                 tool = "lz4";
@@ -1053,7 +1317,10 @@ namespace operation {
                     args.push_back("-" + std::to_string(options.compression_level));
                 }
                 args.push_back("-r"); // Recursive
-                args.push_back(item_to_archive.string());
+                if (items_to_archive.size() != 1) {
+                    error::throw_error(error::ErrorCode::UNKNOWN_FORMAT, {{"INFO", "Multiple sources are not supported for lz4 compression."}});
+                }
+                args.push_back(items_to_archive.front());
                 args.push_back(fs::absolute(target_path_str).string());
                 break;
             case file_type::FileType::ARCHIVE_ZSTD:
@@ -1063,7 +1330,10 @@ namespace operation {
                     args.push_back("-" + std::to_string(options.compression_level));
                 }
                 args.push_back("-r"); // Recursive
-                args.push_back(item_to_archive.string());
+                if (items_to_archive.size() != 1) {
+                    error::throw_error(error::ErrorCode::UNKNOWN_FORMAT, {{"INFO", "Multiple sources are not supported for zstd compression."}});
+                }
+                args.push_back(items_to_archive.front());
                 args.push_back("-o");
                 args.push_back(fs::absolute(target_path_str).string());
                 break;
@@ -1072,7 +1342,7 @@ namespace operation {
                 if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
                 args.push_back("-cf");
                 args.push_back(fs::absolute(target_path_str).string());
-                args.push_back(item_to_archive.string());
+                args.insert(args.end(), items_to_archive.begin(), items_to_archive.end());
                 break;
             default:
                 error::throw_error(error::ErrorCode::UNKNOWN_FORMAT, {{"INFO", "Unsupported target format for compression."}});
@@ -1112,6 +1382,14 @@ namespace operation {
         if (options.benchmark || options.verbose) {
             progress::print_stats(options.verbose, options.benchmark);
         }
+    }
+
+    void compress(const std::string& source_path_str, const std::string& target_path_str, 
+                 file_type::FileType target_format, const std::string& password,
+                 const args::Options& options = {}) {
+        bool has_trailing_slash = !source_path_str.empty() && (source_path_str.back() == '/' || source_path_str.back() == '\\');
+        CompressionSource src{source_path_str, has_trailing_slash};
+        compress({src}, target_path_str, target_format, password, options);
     }
     
     void decompress(const std::string& source_path, const std::string& target_dir_path, 
@@ -1394,11 +1672,13 @@ namespace interactive {
             if (options.target_path.empty()) options.target_path = ".";
         }
 
-        if (fs::exists(options.target_path) && !fs::is_directory(options.target_path)) {
-            if (!get_confirmation("ask_overwrite", {{"TARGET_PATH", options.target_path}})) {
-                std::cout << i18n::get("operation_canceled") << std::endl;
-                return;
-            }
+        const auto interactive_input_adapter = []() { return get_input(); };
+        const auto interactive_output_adapter = [](const std::string& message) { std::cout << message << std::flush; };
+        const auto interactive_error_adapter = [](const std::string& message) { std::cerr << message << std::flush; };
+
+        if (!target_path::resolve_existing_target(options.target_path, interactive_input_adapter, interactive_output_adapter, interactive_error_adapter)) {
+            std::cout << i18n::get("operation_canceled") << std::endl;
+            return;
         }
         
         bool delete_source = get_confirmation("ask_delete_source", {{"SOURCE_PATH", options.source_path}});
@@ -1448,42 +1728,93 @@ int main(int argc, char* argv[]) {
         if (options.interactive_mode) {
             interactive::run(options); 
         } else {
-            // Prevent operating on the same file/directory
-            if (fs::exists(options.source_path) && fs::exists(options.target_path)) {
-                std::error_code ec;
-                if (fs::equivalent(options.source_path, options.target_path, ec) && !ec) {
-                    error::throw_error(error::ErrorCode::SAME_PATH);
-                }
-            }
+            const auto cli_input_adapter = []() { return cli_io::get_input(); };
+            const auto cli_output_adapter = [](const std::string& message) { std::cout << message << std::flush; };
+            const auto cli_error_adapter = [](const std::string& message) { std::cerr << message << std::flush; };
 
-            file_type::RecognitionResult result = file_type::recognize(options.source_path, options.target_path);
-            
-            // Override target format if manually specified
-            if (!options.force_format.empty()) {
-                file_type::FileType forced_type = file_type::parse_format_string(options.force_format);
-                if (forced_type == file_type::FileType::UNKNOWN) {
-                    error::throw_error(error::ErrorCode::UNKNOWN_FORMAT, {{"INFO", "Invalid format specified: " + options.force_format}});
+            if (options.source_paths.size() > 1) {
+                // Ensure target is not the same as any source.
+                if (fs::exists(options.target_path)) {
+                    for (const auto& src : options.source_paths) {
+                        if (fs::exists(src)) {
+                            std::error_code ec;
+                            if (fs::equivalent(src, options.target_path, ec) && !ec) {
+                                error::throw_error(error::ErrorCode::SAME_PATH);
+                            }
+                        }
+                    }
+                }
+
+                file_type::FileType target_type = file_type::recognize_by_extension(options.target_path);
+                if (!options.force_format.empty()) {
+                    file_type::FileType forced_type = file_type::parse_format_string(options.force_format);
+                    if (forced_type == file_type::FileType::UNKNOWN) {
+                        error::throw_error(error::ErrorCode::UNKNOWN_FORMAT, {{"INFO", "Invalid format specified: " + options.force_format}});
+                    }
+                    target_type = forced_type;
+                }
+
+                if (target_type == file_type::FileType::UNKNOWN) {
+                    error::throw_error(error::ErrorCode::UNKNOWN_FORMAT, {{"INFO", "Target format could not be determined. Please specify --format or use archive extension in target path."}});
+                }
+
+                if (!target_path::resolve_existing_target(options.target_path, cli_input_adapter, cli_output_adapter, cli_error_adapter)) {
+                    std::cout << i18n::get("operation_canceled") << std::endl;
+                    std::cout << i18n::get("goodbye") << std::endl;
+                    return 0;
+                }
+
+                std::vector<operation::CompressionSource> compression_sources;
+                compression_sources.reserve(options.source_paths.size());
+                for (const auto& src : options.source_paths) {
+                    compression_sources.push_back({src, false});
+                }
+
+                operation::compress(compression_sources, options.target_path, target_type, options.password, options);
+            } else {
+                // Prevent operating on the same file/directory
+                if (fs::exists(options.source_path) && fs::exists(options.target_path)) {
+                    std::error_code ec;
+                    if (fs::equivalent(options.source_path, options.target_path, ec) && !ec) {
+                        error::throw_error(error::ErrorCode::SAME_PATH);
+                    }
+                }
+
+                file_type::RecognitionResult result = file_type::recognize(options.source_path, options.target_path);
+                
+                // Override target format if manually specified
+                if (!options.force_format.empty()) {
+                    file_type::FileType forced_type = file_type::parse_format_string(options.force_format);
+                    if (forced_type == file_type::FileType::UNKNOWN) {
+                        error::throw_error(error::ErrorCode::UNKNOWN_FORMAT, {{"INFO", "Invalid format specified: " + options.force_format}});
+                    }
+                    
+                    // For compression, override the target format
+                    if (result.operation == file_type::OperationType::COMPRESS) {
+                        result.target_type_hint = forced_type;
+                    } else {
+                        // For decompression, override the source type detection
+                        result.source_type = forced_type;
+                    }
                 }
                 
-                // For compression, override the target format
-                if (result.operation == file_type::OperationType::COMPRESS) {
-                    result.target_type_hint = forced_type;
-                } else {
-                    // For decompression, override the source type detection
-                    result.source_type = forced_type;
+                // Check if we need format specification for compression
+                if (result.operation == file_type::OperationType::COMPRESS && 
+                    result.target_type_hint == file_type::FileType::UNKNOWN) {
+                    error::throw_error(error::ErrorCode::UNKNOWN_FORMAT, {{"INFO", "Target format could not be determined. Please specify --format or use archive extension in target path."}});
                 }
-            }
-            
-            // Check if we need format specification for compression
-            if (result.operation == file_type::OperationType::COMPRESS && 
-                result.target_type_hint == file_type::FileType::UNKNOWN) {
-                error::throw_error(error::ErrorCode::UNKNOWN_FORMAT, {{"INFO", "Target format could not be determined. Please specify --format or use archive extension in target path."}});
-            }
-            
-            if (result.operation == file_type::OperationType::COMPRESS) {
-                operation::compress(options.source_path, options.target_path, result.target_type_hint, options.password, options);
-            } else if (result.operation == file_type::OperationType::DECOMPRESS) {
-                operation::decompress(options.source_path, options.target_path, result.source_type, options.password, options);
+
+                if (!target_path::resolve_existing_target(options.target_path, cli_input_adapter, cli_output_adapter, cli_error_adapter)) {
+                    std::cout << i18n::get("operation_canceled") << std::endl;
+                    std::cout << i18n::get("goodbye") << std::endl;
+                    return 0;
+                }
+                
+                if (result.operation == file_type::OperationType::COMPRESS) {
+                    operation::compress(options.source_path, options.target_path, result.target_type_hint, options.password, options);
+                } else if (result.operation == file_type::OperationType::DECOMPRESS) {
+                    operation::decompress(options.source_path, options.target_path, result.source_type, options.password, options);
+                }
             }
         }
         
