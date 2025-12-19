@@ -79,7 +79,7 @@ namespace util {
 }
 
 // [NEW] Application constants for easy maintenance and display.
-constexpr std::string_view APP_VERSION = "2.0.3";
+constexpr std::string_view APP_VERSION = "2.0.4";
 constexpr std::string_view APP_WEBSITE = "https://hitmux.top";
 constexpr std::string_view APP_GITHUB = "https://github.com/Hitmux/hitpag";
 
@@ -646,6 +646,15 @@ namespace file_type {
         OperationType operation = OperationType::UNKNOWN;
     };
     
+
+    // Check if extension matches split ZIP part pattern (.z01, .z02, ... .z99)
+    // This is a helper function used by both file_type and operation namespaces
+    bool is_split_zip_extension(const std::string& ext_lower) {
+        return ext_lower.size() == 4 && ext_lower[0] == '.' && ext_lower[1] == 'z' &&
+               std::isdigit(static_cast<unsigned char>(ext_lower[2])) &&
+               std::isdigit(static_cast<unsigned char>(ext_lower[3]));
+    }
+
     FileType recognize_by_extension(const std::string& path_str) {
         fs::path p(path_str);
         if (!p.has_extension()) return FileType::UNKNOWN;
@@ -654,12 +663,7 @@ namespace file_type {
 
         if (ext == ".tar") return FileType::ARCHIVE_TAR;
         if (ext == ".zip") return FileType::ARCHIVE_ZIP;
-        // Recognize split ZIP parts (.z01, .z02, ... .z99) as ZIP archives
-        if (ext.size() == 4 && ext[0] == '.' && ext[1] == 'z' &&
-            std::isdigit(static_cast<unsigned char>(ext[2])) &&
-            std::isdigit(static_cast<unsigned char>(ext[3]))) {
-            return FileType::ARCHIVE_ZIP;
-        }
+        if (is_split_zip_extension(ext)) return FileType::ARCHIVE_ZIP;
         if (ext == ".rar") return FileType::ARCHIVE_RAR;
         if (ext == ".7z") return FileType::ARCHIVE_7Z;
         if (ext == ".lz4") return FileType::ARCHIVE_LZ4;
@@ -1030,10 +1034,7 @@ namespace operation {
         std::string ext = p.extension().string();
         std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c){ return std::tolower(c); });
 
-        // Check for .z## pattern (e.g., .z01, .z02, ... .z99)
-        return ext.size() == 4 && ext[0] == '.' && ext[1] == 'z' &&
-               std::isdigit(static_cast<unsigned char>(ext[2])) &&
-               std::isdigit(static_cast<unsigned char>(ext[3]));
+        return file_type::is_split_zip_extension(ext);
     }
 
     // Find the main .zip file for a split archive
