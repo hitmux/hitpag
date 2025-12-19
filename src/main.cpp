@@ -174,6 +174,9 @@ namespace i18n {
         {"operation_complete", "Operation complete"},
         {"operation_canceled", "Operation canceled"},
         {"warning_tar_password", "Warning: Password protection is not supported for tar formats. The password will be ignored."},
+        {"info_split_zip_detected", "Split ZIP archive detected, using 7z for extraction."},
+        {"error_split_zip_requires_7z", "Error: Split ZIP archives require '7z' (p7zip) for extraction. Please install p7zip-full."},
+        {"error_split_zip_main_not_found", "Main ZIP file not found for split archive. Expected: {PATH}"},
         {"filtering_files", "Filtering files: included {INCLUDED}, excluded {EXCLUDED}"},
         {"target_exists_header", "Target {OBJECT_TYPE} '{TARGET_PATH}' already exists."},
         {"target_exists_options", "Choose action: [O]verwrite / [C]ancel / [R]ename"},
@@ -651,6 +654,12 @@ namespace file_type {
 
         if (ext == ".tar") return FileType::ARCHIVE_TAR;
         if (ext == ".zip") return FileType::ARCHIVE_ZIP;
+        // Recognize split ZIP parts (.z01, .z02, ... .z99) as ZIP archives
+        if (ext.size() == 4 && ext[0] == '.' && ext[1] == 'z' &&
+            std::isdigit(static_cast<unsigned char>(ext[2])) &&
+            std::isdigit(static_cast<unsigned char>(ext[3]))) {
+            return FileType::ARCHIVE_ZIP;
+        }
         if (ext == ".rar") return FileType::ARCHIVE_RAR;
         if (ext == ".7z") return FileType::ARCHIVE_7Z;
         if (ext == ".lz4") return FileType::ARCHIVE_LZ4;
@@ -1011,6 +1020,70 @@ namespace operation {
             std::string command = "command -v " + std::string(tool) + " > /dev/null 2>&1";
         #endif
         return system(command.c_str()) == 0;
+    }
+
+    // Check if file extension is a split ZIP part (.z01, .z02, ... .z99)
+    bool is_split_zip_part(const std::string& path) {
+        fs::path p(path);
+        if (!p.has_extension()) return false;
+
+        std::string ext = p.extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c){ return std::tolower(c); });
+
+        // Check for .z## pattern (e.g., .z01, .z02, ... .z99)
+        return ext.size() == 4 && ext[0] == '.' && ext[1] == 'z' &&
+               std::isdigit(static_cast<unsigned char>(ext[2])) &&
+               std::isdigit(static_cast<unsigned char>(ext[3]));
+    }
+
+    // Find the main .zip file for a split archive
+    // Input can be .zip file or any split part (.z01, .z02, etc.)
+    // Returns empty string if main file not found
+    std::string find_split_zip_main(const std::string& any_part_path) {
+        fs::path p(any_part_path);
+        fs::path main_zip = p;
+        main_zip.replace_extension(".zip");
+
+        if (fs::exists(main_zip)) {
+            return main_zip.string();
+        }
+        return "";
+    }
+
+    // Check if a ZIP file is part of a split archive (has .z01, .z02, etc.)
+    // Works with both .zip main file and .z01/.z02/etc. split parts
+    bool is_split_zip(const std::string& zip_path) {
+        fs::path p(zip_path);
+        if (!p.has_extension()) return false;
+
+        std::string ext = p.extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c){ return std::tolower(c); });
+
+        // If it's a split part (.z01, .z02, etc.), it's definitely a split archive
+        if (is_split_zip_part(zip_path)) {
+            return true;
+        }
+
+        // If it's a .zip file, check if .z01 exists
+        if (ext != ".zip") return false;
+
+        fs::path z01_path = p;
+        z01_path.replace_extension(".z01");
+        return fs::exists(z01_path);
+    }
+
+    // Build 7z extraction arguments (shared between 7z format and split ZIP)
+    void build_7z_extract_args(std::vector<std::string>& args,
+                               const std::string& source_path,
+                               const std::string& target_dir_path,
+                               const std::string& password) {
+        args.push_back("x");
+        if (!password.empty()) {
+            args.push_back("-p" + password);
+        }
+        args.push_back(fs::absolute(source_path).string());
+        args.push_back("-o" + fs::absolute(target_dir_path).string());
+        args.push_back("-y");
     }
 
 #ifdef _WIN32
@@ -1421,10 +1494,38 @@ namespace operation {
                 }
                 break;
             case file_type::FileType::ARCHIVE_ZIP:
-                tool = "unzip";
-                if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
-                if (!password.empty()) args.insert(args.end(), {"-P", password});
-                args.insert(args.end(), {"-o", fs::absolute(source_path).string(), "-d", fs::absolute(target_dir_path).string()}); // -o: overwrite
+                if (is_split_zip(source_path)) {
+                    // Split ZIP archives require 7z (unzip doesn't support them)
+                    tool = "7z";
+                    if (!is_tool_available(tool)) {
+                        // Provide specific error for split ZIP
+                        throw error::HitpagException(error::ErrorCode::TOOL_NOT_FOUND,
+                            i18n::get("error_split_zip_requires_7z"));
+                    }
+
+                    // If user provided a split part (.z01, .z02), find the main .zip file
+                    std::string actual_source = source_path;
+                    if (is_split_zip_part(source_path)) {
+                        actual_source = find_split_zip_main(source_path);
+                        if (actual_source.empty()) {
+                            error::throw_error(error::ErrorCode::INVALID_SOURCE,
+                                {{"PATH", fs::path(source_path).replace_extension(".zip").string()},
+                                 {"REASON", i18n::get("error_split_zip_main_not_found",
+                                     {{"PATH", fs::path(source_path).replace_extension(".zip").string()}})}});
+                        }
+                    }
+
+                    if (options.verbose) {
+                        std::cout << i18n::get("info_split_zip_detected") << std::endl;
+                    }
+
+                    build_7z_extract_args(args, actual_source, target_dir_path, password);
+                } else {
+                    tool = "unzip";
+                    if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
+                    if (!password.empty()) args.insert(args.end(), {"-P", password});
+                    args.insert(args.end(), {"-o", fs::absolute(source_path).string(), "-d", fs::absolute(target_dir_path).string()});
+                }
                 break;
             case file_type::FileType::ARCHIVE_RAR:
                 tool = "unrar";
@@ -1436,11 +1537,7 @@ namespace operation {
             case file_type::FileType::ARCHIVE_7Z:
                 tool = "7z";
                 if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
-                args.push_back("x"); // eXtract with full paths
-                if (!password.empty()) args.push_back("-p" + password);
-                args.push_back(fs::absolute(source_path).string());
-                args.push_back("-o" + fs::absolute(target_dir_path).string()); // -o: output directory
-                args.push_back("-y"); // Assume Yes to all queries
+                build_7z_extract_args(args, source_path, target_dir_path, password);
                 break;
             case file_type::FileType::ARCHIVE_LZ4:
                 tool = "lz4";
