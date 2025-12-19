@@ -1,7 +1,0 @@
-/opt/hitpag/build/CMakeFiles/hitpag.dir
-/opt/hitpag/build/CMakeFiles/edit_cache.dir
-/opt/hitpag/build/CMakeFiles/rebuild_cache.dir
-/opt/hitpag/build/CMakeFiles/list_install_components.dir
-/opt/hitpag/build/CMakeFiles/install.dir
-/opt/hitpag/build/CMakeFiles/install/local.dir
-/opt/hitpag/build/CMakeFiles/install/strip.dir
