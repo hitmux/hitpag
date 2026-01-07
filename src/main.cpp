@@ -510,10 +510,15 @@ namespace args {
             } else if (opt.rfind("-l", 0) == 0) { // Compression level
                 if (opt.length() > 2) {
                     try {
-                        options.compression_level = std::stoi(opt.substr(2));
-                        if (options.compression_level < 1 || options.compression_level > 9) {
+                        size_t pos;
+                        long level = std::stol(opt.substr(2), &pos);
+                        // Check if entire string was consumed and value is in valid range
+                        if (pos != opt.length() - 2 || level < 1 || level > 9) {
                             error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Compression level must be between 1-9"}});
                         }
+                        options.compression_level = static_cast<int>(level);
+                    } catch (const std::out_of_range&) {
+                        error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Compression level value out of range"}});
                     } catch (const std::exception&) {
                         error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Invalid compression level"}});
                     }
@@ -524,10 +529,15 @@ namespace args {
             } else if (opt.rfind("-t", 0) == 0) { // Thread count
                 if (opt.length() > 2) {
                     try {
-                        options.thread_count = std::stoi(opt.substr(2));
-                        if (options.thread_count < 1) {
-                            error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Thread count must be positive"}});
+                        size_t pos;
+                        long thread_val = std::stol(opt.substr(2), &pos);
+                        // Check if entire string was consumed and value is positive and reasonable
+                        if (pos != opt.length() - 2 || thread_val < 1 || thread_val > 1024) {
+                            error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Thread count must be between 1-1024"}});
                         }
+                        options.thread_count = static_cast<int>(thread_val);
+                    } catch (const std::out_of_range&) {
+                        error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Thread count value out of range"}});
                     } catch (const std::exception&) {
                         error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Invalid thread count"}});
                     }
@@ -691,7 +701,8 @@ namespace file_type {
         if (!file) return FileType::UNKNOWN;
         std::array<char, 16> header{}; 
         file.read(header.data(), header.size());
-        if(file.gcount() < 4) return FileType::UNKNOWN; 
+        // Check both that we read enough bytes and that the read operation succeeded
+        if(file.gcount() < 4 || file.fail()) return FileType::UNKNOWN; 
 
         // ZIP archives (PK signature, but check if it's really ZIP vs other PK-based formats)
         if (header[0] == 0x50 && header[1] == 0x4B) {
@@ -1143,9 +1154,13 @@ namespace operation {
             command_line += " " + quote_argument_for_windows(arg);
         }
 
+        // CreateProcessA can modify the command line buffer, so we need a writable copy
+        std::vector<char> cmd_line_buf(command_line.begin(), command_line.end());
+        cmd_line_buf.push_back('\0'); // Ensure null termination
+
         BOOL bSuccess = CreateProcessA(
             NULL,
-            &command_line[0],
+            cmd_line_buf.data(),
             NULL, NULL, TRUE, 0, NULL,
             working_dir.empty() ? NULL : working_dir.c_str(),
             &siStartInfo, &piProcInfo
