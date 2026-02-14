@@ -24,7 +24,7 @@
 ### 安装
 ```bash
 # Ubuntu/Debian
-sudo apt install -y tar gzip bzip2 xz-utils zip unzip p7zip-full lz4 zstd
+sudo apt install -y tar gzip bzip2 xz-utils zip unzip p7zip-full lz4 zstd g++ cmake make
 
 # 构建
 git clone https://github.com/Hitmux/hitpag.git
@@ -138,4 +138,4 @@ hitpag --format=rar unknown  # 强制指定格式
 
 ---
 
-**开发者**: [Hitmux](https://hitmux.top)
+**开发者**: [Hitmux](https://hitmux.org)
