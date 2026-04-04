@@ -36,10 +36,10 @@ namespace progress {
 
     size_t ProgressTracker::calculate_directory_size(const std::string& path) const {
         size_t total_size = 0;
-        std::error_code ec;
 
-        for (const auto& entry : fs::recursive_directory_iterator(path, ec)) {
-            if (!ec && entry.is_regular_file()) {
+        for (const auto& entry : fs::recursive_directory_iterator(path)) {
+            std::error_code ec;
+            if (entry.is_regular_file(ec)) {
                 total_size += entry.file_size(ec);
             }
         }
