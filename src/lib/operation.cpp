@@ -183,6 +183,7 @@ namespace operation {
             case file_type::FileType::ARCHIVE_TAR_GZ:
             case file_type::FileType::ARCHIVE_TAR_BZ2:
             case file_type::FileType::ARCHIVE_TAR_XZ:
+            case file_type::FileType::ARCHIVE_TAR_ZSTD:
                 tool = "tar";
                 args = {"-tf", archive_path};
                 break;
@@ -193,6 +194,22 @@ namespace operation {
             case file_type::FileType::ARCHIVE_7Z:
                 tool = "7z";
                 args = {"t", archive_path};
+                break;
+            case file_type::FileType::ARCHIVE_RAR:
+                tool = "unrar";
+                args = {"t", archive_path};
+                break;
+            case file_type::FileType::ARCHIVE_LZ4:
+                tool = "lz4";
+                args = {"-t", archive_path};
+                break;
+            case file_type::FileType::ARCHIVE_ZSTD:
+                tool = "zstd";
+                args = {"-t", archive_path};
+                break;
+            case file_type::FileType::ARCHIVE_XAR:
+                tool = "xar";
+                args = {"-tf", archive_path};
                 break;
             default:
                 return true;
@@ -553,7 +570,7 @@ namespace operation {
         }
 
         std::cout << i18n::get("decompressing") << std::endl;
-        int result = execute_command(tool, args);
+        int result = execute_command(tool, args, fs::current_path().string());
         if (result != 0) {
             error::throw_error(error::ErrorCode::OPERATION_FAILED, {{"COMMAND", tool}, {"EXIT_CODE", std::to_string(result)}});
         }

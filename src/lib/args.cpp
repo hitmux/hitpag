@@ -66,7 +66,7 @@ namespace args {
                         error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Invalid compression level"}});
                     }
                 } else {
-                    options.compression_level = 6;
+                    options.compression_level = 0; // Default depends on format
                 }
                 i++;
             } else if (opt.rfind("-t", 0) == 0) {
@@ -134,11 +134,6 @@ namespace args {
         }
         if (options.source_paths.empty() && !options.target_path.empty()) {
             error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Source path missing"}});
-        }
-
-        if (!options.interactive_mode && !options.show_help && !options.show_version) {
-            if (options.source_paths.empty()) error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Source path missing"}});
-            if (options.target_path.empty()) error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Target path missing"}});
         }
 
         return options;

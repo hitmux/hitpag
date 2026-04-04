@@ -116,15 +116,7 @@ namespace i18n {
             }
         }
 
-        size_t start_ph = 0;
-        while ((start_ph = message_template.find("{", start_ph)) != std::string::npos) {
-            size_t end_ph = message_template.find("}", start_ph);
-            if (end_ph != std::string::npos) {
-                message_template.erase(start_ph, end_ph - start_ph + 1);
-            } else {
-                break;
-            }
-        }
+        // Keep unreplaced placeholders as-is to help developers identify missing values
         return message_template;
     }
 }

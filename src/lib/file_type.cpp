@@ -78,13 +78,6 @@ namespace file_type {
             return FileType::ARCHIVE_7Z;
         }
 
-        if (header[0] == (char)0x1F && header[1] == (char)0x8B) {
-            return FileType::ARCHIVE_TAR_GZ;
-        }
-
-        if (header[0] == 0x42 && header[1] == 0x5A && header[2] == 0x68) {
-            return FileType::ARCHIVE_TAR_BZ2;
-        }
 
         if (file.gcount() >= 6 && header[0] == (char)0xFD && header[1] == 0x37 && header[2] == 0x7A &&
             header[3] == 0x58 && header[4] == 0x5A && header[5] == 0x00) {
@@ -164,12 +157,7 @@ namespace file_type {
         bool target_is_archive = (result.target_type_hint != FileType::UNKNOWN && result.target_type_hint != FileType::REGULAR_FILE && result.target_type_hint != FileType::DIRECTORY);
 
         if (result.source_type == FileType::DIRECTORY || result.source_type == FileType::REGULAR_FILE) {
-            if (target_is_archive) {
-                result.operation = OperationType::COMPRESS;
-            } else {
-                result.operation = OperationType::COMPRESS;
-                result.target_type_hint = FileType::UNKNOWN;
-            }
+            result.operation = OperationType::COMPRESS;
         } else {
             result.operation = OperationType::DECOMPRESS;
             if (fs::exists(target_path_str) && !fs::is_directory(target_path_str)) {
