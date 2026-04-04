@@ -34,7 +34,6 @@ namespace file_type {
         if (ext == ".rar") return FileType::ARCHIVE_RAR;
         if (ext == ".7z") return FileType::ARCHIVE_7Z;
         if (ext == ".lz4") return FileType::ARCHIVE_LZ4;
-        if (ext == ".zst" || ext == ".zstd") return FileType::ARCHIVE_ZSTD;
         if (ext == ".xar") return FileType::ARCHIVE_XAR;
         if (ext == ".tgz") return FileType::ARCHIVE_TAR_GZ;
         if (ext == ".tbz2" || ext == ".tbz") return FileType::ARCHIVE_TAR_BZ2;
@@ -47,8 +46,11 @@ namespace file_type {
                 if (ext == ".gz") return FileType::ARCHIVE_TAR_GZ;
                 if (ext == ".bz2") return FileType::ARCHIVE_TAR_BZ2;
                 if (ext == ".xz") return FileType::ARCHIVE_TAR_XZ;
+                if (ext == ".zst" || ext == ".zstd") return FileType::ARCHIVE_TAR_ZSTD;
             }
         }
+
+        if (ext == ".zst" || ext == ".zstd") return FileType::ARCHIVE_ZSTD;
         return FileType::UNKNOWN;
     }
 
@@ -140,9 +142,9 @@ namespace file_type {
         if (fs::is_directory(source_path_str)) return FileType::DIRECTORY;
 
         if (fs::is_regular_file(source_path_str)) {
-            FileType type = recognize_by_header(source_path_str);
-            if (type == FileType::UNKNOWN) {
-                type = recognize_by_extension(source_path_str);
+            FileType type = recognize_by_extension(source_path_str);
+            if (type == FileType::UNKNOWN || type == FileType::REGULAR_FILE) {
+                type = recognize_by_header(source_path_str);
             }
             return (type == FileType::UNKNOWN) ? FileType::REGULAR_FILE : type;
         }
@@ -183,6 +185,7 @@ namespace file_type {
             {FileType::REGULAR_FILE, "Regular File"}, {FileType::DIRECTORY, "Directory"},
             {FileType::ARCHIVE_TAR, "TAR Archive"}, {FileType::ARCHIVE_TAR_GZ, "TAR.GZ Archive"},
             {FileType::ARCHIVE_TAR_BZ2, "TAR.BZ2 Archive"}, {FileType::ARCHIVE_TAR_XZ, "TAR.XZ Archive"},
+            {FileType::ARCHIVE_TAR_ZSTD, "TAR.ZST Archive"},
             {FileType::ARCHIVE_ZIP, "ZIP Archive"}, {FileType::ARCHIVE_RAR, "RAR Archive"},
             {FileType::ARCHIVE_7Z, "7Z Archive"}, {FileType::ARCHIVE_LZ4, "LZ4 Archive"},
             {FileType::ARCHIVE_ZSTD, "ZSTD Archive"}, {FileType::ARCHIVE_XAR, "XAR Archive"},
@@ -202,6 +205,7 @@ namespace file_type {
         if (fmt == "tar.gz" || fmt == "tgz") return FileType::ARCHIVE_TAR_GZ;
         if (fmt == "tar.bz2" || fmt == "tbz2") return FileType::ARCHIVE_TAR_BZ2;
         if (fmt == "tar.xz" || fmt == "txz") return FileType::ARCHIVE_TAR_XZ;
+        if (fmt == "tar.zst" || fmt == "tar.zstd") return FileType::ARCHIVE_TAR_ZSTD;
         if (fmt == "rar") return FileType::ARCHIVE_RAR;
         if (fmt == "lz4") return FileType::ARCHIVE_LZ4;
         if (fmt == "zstd" || fmt == "zst") return FileType::ARCHIVE_ZSTD;

@@ -317,16 +317,21 @@ namespace operation {
             case file_type::FileType::ARCHIVE_TAR_GZ:
             case file_type::FileType::ARCHIVE_TAR_BZ2:
             case file_type::FileType::ARCHIVE_TAR_XZ:
+            case file_type::FileType::ARCHIVE_TAR_ZSTD:
                 if (!password.empty()) std::cout << i18n::get("warning_tar_password") << std::endl;
                 tool = "tar";
                 if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
                 {
-                    std::string flags;
-                    if (target_format == file_type::FileType::ARCHIVE_TAR) flags = "-cf";
-                    if (target_format == file_type::FileType::ARCHIVE_TAR_GZ) flags = "-czf";
-                    if (target_format == file_type::FileType::ARCHIVE_TAR_BZ2) flags = "-cjf";
-                    if (target_format == file_type::FileType::ARCHIVE_TAR_XZ) flags = "-cJf";
-                    args = {flags, fs::absolute(target_path_str).string()};
+                    if (target_format == file_type::FileType::ARCHIVE_TAR_ZSTD) {
+                        args = {"--zstd", "-cf", fs::absolute(target_path_str).string()};
+                    } else {
+                        std::string flags;
+                        if (target_format == file_type::FileType::ARCHIVE_TAR) flags = "-cf";
+                        if (target_format == file_type::FileType::ARCHIVE_TAR_GZ) flags = "-czf";
+                        if (target_format == file_type::FileType::ARCHIVE_TAR_BZ2) flags = "-cjf";
+                        if (target_format == file_type::FileType::ARCHIVE_TAR_XZ) flags = "-cJf";
+                        args = {flags, fs::absolute(target_path_str).string()};
+                    }
                     args.insert(args.end(), items_to_archive.begin(), items_to_archive.end());
                 }
                 break;
@@ -358,11 +363,13 @@ namespace operation {
                 if (options.compression_level > 0) {
                     args.push_back("-" + std::to_string(options.compression_level));
                 }
-                args.push_back("-r");
                 if (items_to_archive.size() != 1) {
                     error::throw_error(error::ErrorCode::UNKNOWN_FORMAT, {{"INFO", "Multiple sources are not supported for lz4 compression."}});
                 }
-                args.push_back(items_to_archive.front());
+                if (fs::is_directory(canonical_sources.front())) {
+                    error::throw_error(error::ErrorCode::UNKNOWN_FORMAT, {{"INFO", "lz4 does not support directory compression. Use tar.lz4 instead."}});
+                }
+                args.push_back(fs::absolute(canonical_sources.front()).string());
                 args.push_back(fs::absolute(target_path_str).string());
                 break;
             case file_type::FileType::ARCHIVE_ZSTD:
@@ -371,11 +378,13 @@ namespace operation {
                 if (options.compression_level > 0) {
                     args.push_back("-" + std::to_string(options.compression_level));
                 }
-                args.push_back("-r");
                 if (items_to_archive.size() != 1) {
                     error::throw_error(error::ErrorCode::UNKNOWN_FORMAT, {{"INFO", "Multiple sources are not supported for zstd compression."}});
                 }
-                args.push_back(items_to_archive.front());
+                if (fs::is_directory(canonical_sources.front())) {
+                    error::throw_error(error::ErrorCode::UNKNOWN_FORMAT, {{"INFO", "zstd does not support directory compression. Use tar.zst instead."}});
+                }
+                args.push_back(fs::absolute(canonical_sources.front()).string());
                 args.push_back("-o");
                 args.push_back(fs::absolute(target_path_str).string());
                 break;
@@ -445,16 +454,21 @@ namespace operation {
             case file_type::FileType::ARCHIVE_TAR_GZ:
             case file_type::FileType::ARCHIVE_TAR_BZ2:
             case file_type::FileType::ARCHIVE_TAR_XZ:
+            case file_type::FileType::ARCHIVE_TAR_ZSTD:
                 if (!password.empty()) std::cout << i18n::get("warning_tar_password") << std::endl;
                 tool = "tar";
                 if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
                 {
-                    std::string flags;
-                    if (source_type == file_type::FileType::ARCHIVE_TAR) flags = "-xf";
-                    if (source_type == file_type::FileType::ARCHIVE_TAR_GZ) flags = "-xzf";
-                    if (source_type == file_type::FileType::ARCHIVE_TAR_BZ2) flags = "-xjf";
-                    if (source_type == file_type::FileType::ARCHIVE_TAR_XZ) flags = "-xJf";
-                    args = {flags, fs::absolute(source_path).string(), "-C", fs::absolute(target_dir_path).string()};
+                    if (source_type == file_type::FileType::ARCHIVE_TAR_ZSTD) {
+                        args = {"-xf", fs::absolute(source_path).string(), "-C", fs::absolute(target_dir_path).string()};
+                    } else {
+                        std::string flags;
+                        if (source_type == file_type::FileType::ARCHIVE_TAR) flags = "-xf";
+                        if (source_type == file_type::FileType::ARCHIVE_TAR_GZ) flags = "-xzf";
+                        if (source_type == file_type::FileType::ARCHIVE_TAR_BZ2) flags = "-xjf";
+                        if (source_type == file_type::FileType::ARCHIVE_TAR_XZ) flags = "-xJf";
+                        args = {flags, fs::absolute(source_path).string(), "-C", fs::absolute(target_dir_path).string()};
+                    }
                 }
                 break;
             case file_type::FileType::ARCHIVE_ZIP:
@@ -501,16 +515,30 @@ namespace operation {
                 tool = "lz4";
                 if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
                 args.push_back("-d");
+                args.push_back("-f");
                 args.push_back(fs::absolute(source_path).string());
-                args.push_back(fs::absolute(target_dir_path).string());
+                {
+                    fs::path src_p(source_path);
+                    std::string out_name = src_p.stem().string();
+                    fs::path out_path = fs::path(target_dir_path) / out_name;
+                    fs::create_directories(out_path.parent_path());
+                    args.push_back(fs::absolute(out_path).string());
+                }
                 break;
             case file_type::FileType::ARCHIVE_ZSTD:
                 tool = "zstd";
                 if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
                 args.push_back("-d");
+                args.push_back("-f");
                 args.push_back(fs::absolute(source_path).string());
-                args.push_back("-o");
-                args.push_back(fs::absolute(target_dir_path).string());
+                {
+                    fs::path src_p(source_path);
+                    std::string out_name = src_p.stem().string();
+                    fs::path out_path = fs::path(target_dir_path) / out_name;
+                    fs::create_directories(out_path.parent_path());
+                    args.push_back("-o");
+                    args.push_back(fs::absolute(out_path).string());
+                }
                 break;
             case file_type::FileType::ARCHIVE_XAR:
                 tool = "xar";
