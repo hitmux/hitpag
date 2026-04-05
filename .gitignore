@@ -5,3 +5,5 @@ CLAUDE.md
 .serena/
 
 build/
+
+compile_commands.json
