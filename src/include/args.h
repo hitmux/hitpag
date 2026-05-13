@@ -12,6 +12,7 @@
 namespace args {
     struct Options {
         bool interactive_mode = false;
+        bool tui_mode = false;
         bool show_help = false;
         bool show_version = false;
         std::string source_path;

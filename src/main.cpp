@@ -20,6 +20,7 @@
 #include "include/interactive.h"
 #include "include/progress.h"
 #include "include/target_path.h"
+#include "include/tui.h"
 
 namespace fs = std::filesystem;
 
@@ -42,7 +43,22 @@ int main(int argc, char* argv[]) {
             options.password = interactive::get_password_interactively(i18n::get("enter_password"));
         }
 
-        if (options.interactive_mode) {
+        if (!options.tui_mode && !options.interactive_mode &&
+            options.source_paths.empty() && options.source_path.empty() &&
+            !options.target_path.empty()) {
+            file_type::FileType source_type = file_type::recognize_source_type(options.target_path);
+            if (source_type != file_type::FileType::UNKNOWN &&
+                source_type != file_type::FileType::REGULAR_FILE &&
+                source_type != file_type::FileType::DIRECTORY) {
+                options.tui_mode = true;
+                options.source_path = options.target_path;
+                options.target_path.clear();
+            }
+        }
+
+        if (options.tui_mode) {
+            tui::run(options, tracker);
+        } else if (options.interactive_mode) {
             interactive::run(options, tracker);
         } else {
             const auto cli_input_adapter = []() -> std::string {

@@ -7,3 +7,6 @@ CLAUDE.md
 build/
 
 compile_commands.json
+.ace-tool/
+.cache/
+/cc.zip

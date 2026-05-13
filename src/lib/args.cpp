@@ -38,6 +38,9 @@ namespace args {
             if (opt == "-i") {
                 options.interactive_mode = true;
                 i++;
+            } else if (opt == "--tui") {
+                options.tui_mode = true;
+                i++;
             } else if (opt == "-h" || opt == "--help") {
                 options.show_help = true;
                 return options;
@@ -66,7 +69,7 @@ namespace args {
                         error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Invalid compression level"}});
                     }
                 } else {
-                    options.compression_level = 0; // Default depends on format
+                    options.compression_level = 0;
                 }
                 i++;
             } else if (opt.rfind("-t", 0) == 0) {
@@ -120,7 +123,16 @@ namespace args {
             positional_args.push_back(args_vec[i++]);
         }
 
-        if (!positional_args.empty()) {
+        if (options.tui_mode) {
+            if (positional_args.size() > 1) {
+                error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "--tui accepts at most one positional argument"}});
+            }
+            if (!positional_args.empty()) {
+                options.source_path = positional_args.front();
+            }
+            options.source_paths.clear();
+            options.target_path.clear();
+        } else if (!positional_args.empty()) {
             options.target_path = positional_args.back();
             positional_args.pop_back();
             options.source_paths = positional_args;
@@ -129,11 +141,8 @@ namespace args {
             }
         }
 
-        if (!options.source_paths.empty() && options.target_path.empty()) {
+        if (!options.source_paths.empty() && options.target_path.empty() && !options.tui_mode) {
             error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Target path missing"}});
-        }
-        if (options.source_paths.empty() && !options.target_path.empty()) {
-            error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "Source path missing"}});
         }
 
         return options;
@@ -151,7 +160,7 @@ namespace args {
         std::cout << i18n::get("help_options") << std::endl;
 
         const std::vector<HelpOption> help_options = {
-            {"-i", "help_i"}, {"-p", "help_p"}, {"-l", "help_l"}, {"-t", "help_t"},
+            {"-i", "help_i"}, {"--tui", "help_tui"}, {"-p", "help_p"}, {"-l", "help_l"}, {"-t", "help_t"},
             {"--verbose", "help_verbose"}, {"--exclude", "help_exclude"},
             {"--include", "help_include"}, {"--benchmark", "help_benchmark"},
             {"--verify", "help_verify"}, {"--format", "help_format"}, {"-h", "help_h"}, {"-v", "help_v"}
