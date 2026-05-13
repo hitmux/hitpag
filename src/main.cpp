@@ -5,8 +5,8 @@
 // (at your option) any later version.
 
 // hitpag - Smart Compression/Decompression Tool
-// Version: 2.1.0
-// website: https://hitmux.top
+// Version: 2.2.0
+// website: https://hitmux.org
 // github: https://github.com/Hitmux/hitpag
 
 #include <iostream>

@@ -1,6 +1,6 @@
-# hitpag - The Intelligent Compression Tool
+# hitpag - Intelligent Compression Tool
 
-**Smart, powerful, and easy-to-use command-line compression tool**
+**A C++17 command-line compression tool with an archive browser TUI.**
 
 [![GitHub](https://img.shields.io/badge/GitHub-Hitmux/hitpag-blue)](https://github.com/Hitmux/hitpag)
 [![Website](https://img.shields.io/badge/Website-hitmux.org-green)](https://hitmux.org)
@@ -9,93 +9,109 @@
 
 ---
 
-## Why hitpag?
+## Highlights
 
-- **🧠 Smart Recognition** - Automatically detects file format by magic number, not just extension
-- **⚡ One Command** - No need to remember different tools for different formats
-- **📦 All Formats** - tar, gzip, bzip2, xz, zip, 7z, rar, lz4, zstd, xar
-- **🔐 Password Support** - Encryption for zip and 7z formats
-- **🚀 Multi-threaded** - Parallel compression for better performance
+- Detects archive formats by file signature instead of filename extension.
+- Uses one command for compression, extraction, verification, and archive browsing.
+- Includes a TUI archive browser for listing, searching, previewing, extracting, and editing archive entries.
+- Supports tar, gzip, bzip2, xz, zip, 7z, rar, lz4, zstd, and xar.
+- Supports password-protected zip, 7z, and rar extraction where the underlying tool supports it.
+- Uses FTXUI for the terminal interface; a vendored static FTXUI copy is included.
 
 ---
 
-## Quick Start
+## Install
 
-### Install
 ```bash
-# Ubuntu/Debian
+# Ubuntu/Debian runtime and build dependencies
 sudo apt install -y tar unrar gzip bzip2 xz-utils zip unzip p7zip-full lz4 zstd g++ cmake make
 
-# Build
 git clone https://github.com/Hitmux/hitpag.git
-cd hitpag && mkdir build && cd build && cmake .. && make
-sudo make install  # Optional
+cd hitpag
+mkdir -p build
+cd build
+cmake ..
+make
+sudo make install
 ```
 
-### Basic Usage
+FTXUI is resolved during CMake configuration. hitpag prefers a compatible system static FTXUI package and falls back to `third_party/ftxui/`.
+
 ```bash
-# Decompress - just point to the archive
+cmake .. -DHITPAG_FORCE_VENDORED_FTXUI=ON
+cmake .. -DHITPAG_FORCE_SYSTEM_FTXUI=ON
+```
+
+---
+
+## TUI Archive Browser
+
+Open an archive directly in the TUI:
+
+```bash
+hitpag --tui archive.zip
+hitpag archive.tar.gz
+```
+
+When a single supported archive path is provided without a target path, hitpag opens the TUI automatically.
+
+Core TUI actions:
+
+- `Up` / `Down`: move through entries.
+- `Right` / `Enter`: open a directory or move into preview.
+- `Left`: return to the parent directory or file list.
+- `/`: search entries.
+- `x`: extract the selected entry.
+- `e`: edit the selected file through an external editor.
+- `s`: configure the editor command.
+- `?`: open help.
+- `q` or `Esc`: quit or close the current dialog.
+
+---
+
+## CLI Usage
+
+```bash
+# Extract
 hitpag archive.tar.gz ./output/
 hitpag backup.zip ./extracted/
 hitpag data.7z ./data/
 
-# Compress - specify source and target
+# Compress
 hitpag ./my_folder/ backup.zip
 hitpag ./documents/ archive.tar.gz
 
-# With password
+# Password
 hitpag -pMySecret secure.7z ./sensitive/
-hitpag -p encrypted.zip ./output/  # Prompts for password
-```
+hitpag -p encrypted.zip ./output/
 
-That's it! hitpag figures out the rest.
+# Performance and verification
+hitpag -l9 -t8 --benchmark data.tar.xz ./large_files/
+hitpag --verify ./documents/ archive.zip
+```
 
 ---
 
-## Advanced Usage
+## Filtering
 
-### Performance Options
 ```bash
-# Multi-threaded compression with benchmarking
-hitpag -l9 -t8 --benchmark data.tar.xz ./large_files/
-
-# Ultra-fast compression (LZ4)
-hitpag --format=lz4 temp.lz4 ./temp_data/
-
-# High-efficiency compression (Zstandard)
-hitpag --format=zstd archive.zstd ./documents/
-```
-
-### File Filtering
-```bash
-# Include only specific files
 hitpag --include='*.cpp' --include='*.h' code.7z ./project/
-
-# Exclude files
 hitpag --exclude='*.tmp' --exclude='node_modules/*' clean.tar.gz ./project/
-```
-
-### Other Options
-```bash
-hitpag -i                    # Interactive mode
-hitpag --verbose archive.7z  # Detailed output
-hitpag --verify data.tar.gz  # Verify after compression
-hitpag --format=rar unknown  # Force specific format
 ```
 
 ---
 
 ## Supported Formats
 
-| Format | Compress | Decompress | Password | Notes |
-|--------|----------|------------|----------|-------|
-| tar, tar.gz, tar.bz2, tar.xz | ✅ | ✅ | ❌ | Classic Unix formats |
-| zip | ✅ | ✅ | ✅ | Including split archives (.z01, .z02, ...) |
-| 7z | ✅ | ✅ | ✅ | Best compression ratio |
-| rar | ❌ | ✅ | ✅ | Decompress only |
-| lz4 | ✅ | ✅ | ❌ | Ultra-fast speed |
-| zstd | ✅ | ✅ | ❌ | Best speed/ratio balance |
-| xar | ✅ | ✅ | ❌ | macOS native |
+| Format | Compress | Extract | Password | Notes |
+|--------|----------|---------|----------|-------|
+| tar, tar.gz, tar.bz2, tar.xz, tar.zst | yes | yes | no | Unix archive formats |
+| zip | yes | yes | yes | Split zip extraction uses 7z |
+| 7z | yes | yes | yes | High compression ratio |
+| rar | no | yes | yes | Extraction only |
+| lz4 | yes | yes | no | Single-file compression |
+| zstd | yes | yes | no | Single-file compression |
+| xar | yes | yes | no | macOS archive format |
 
 ---
 
@@ -103,16 +119,17 @@ hitpag --format=rar unknown  # Force specific format
 
 | Option | Description |
 |--------|-------------|
-| `-i` | Interactive mode |
-| `-p[password]` | Password (prompts if not provided) |
+| `-i` | Interactive CLI mode |
+| `--tui` | TUI archive browser |
+| `-p[password]` | Password; prompts when omitted |
 | `-l[1-9]` | Compression level |
 | `-t[count]` | Thread count |
-| `--format=TYPE` | Force format |
+| `--format=TYPE` | Force archive type |
 | `--verbose` | Detailed output |
-| `--benchmark` | Performance stats |
-| `--verify` | Integrity check |
-| `--include=PATTERN` | Include files |
-| `--exclude=PATTERN` | Exclude files |
+| `--benchmark` | Performance statistics |
+| `--verify` | Verify archive integrity |
+| `--include=PATTERN` | Include matching paths |
+| `--exclude=PATTERN` | Exclude matching paths |
 
 ---
 
@@ -120,17 +137,17 @@ hitpag --format=rar unknown  # Force specific format
 
 | Problem | Solution |
 |---------|----------|
-| Format not recognized | Use `--format=TYPE` to specify |
-| Permission denied | Check file/directory permissions |
-| Tool not found | Install required tool (p7zip-full, unrar, etc.) |
-| Split ZIP fails | Install p7zip-full (`sudo apt install p7zip-full`) |
+| Format not recognized | Use `--format=TYPE` |
+| Runtime tool not found | Install the corresponding package, such as `p7zip-full`, `unrar`, `lz4`, or `zstd` |
+| Split zip extraction fails | Install `p7zip-full` |
+| TUI does not open automatically | Use `hitpag --tui archive.zip` |
 
 ---
 
 ## Contributing
 
-- 📝 [Issues](https://github.com/Hitmux/hitpag/issues)
-- 🔧 [Pull Requests](https://github.com/Hitmux/hitpag/pulls)
+- [Issues](https://github.com/Hitmux/hitpag/issues)
+- [Pull Requests](https://github.com/Hitmux/hitpag/pulls)
 
 ## License
 
