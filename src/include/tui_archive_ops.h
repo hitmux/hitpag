@@ -10,6 +10,7 @@
 #include <vector>
 #include <cstdint>
 #include "include/file_type.h"
+#include "include/process.h"
 
 namespace tui::archive_ops {
     struct ArchiveEntry {
@@ -28,10 +29,9 @@ namespace tui::archive_ops {
         std::string content;
     };
 
-    struct CommandResult {
-        int exit_code = -1;
-        std::string stdout_output;
-    };
+    using process::CommandResult;
+    using process::run_command_capture;
+    using process::run_command_status;
 
     struct AudioPlaybackResult {
         bool success = false;
@@ -39,8 +39,6 @@ namespace tui::archive_ops {
         std::string player;
     };
 
-    CommandResult run_command_capture(const std::vector<std::string>& cmd);
-    int run_command_status(const std::vector<std::string>& cmd);
 
     std::vector<ArchiveEntry> list_archive(const std::string& archive_path, file_type::FileType type, const std::string& password = "");
     TextExtractionResult extract_text(const std::string& archive_path, const std::string& entry_path, file_type::FileType type, const std::string& password = "");

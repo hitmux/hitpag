@@ -2,7 +2,7 @@ if(NOT DEFINED SOURCE_DIR)
     message(FATAL_ERROR "SOURCE_DIR is required")
 endif()
 
-set(test_build_dir "/opt/hitpag/tmp/cmake_ftxui_vendored_test")
+set(test_build_dir "${CMAKE_CURRENT_BINARY_DIR}/cmake_ftxui_vendored_test")
 file(REMOVE_RECURSE "${test_build_dir}")
 
 execute_process(

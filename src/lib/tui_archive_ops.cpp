@@ -6,6 +6,8 @@
 
 #include "include/tui_archive_ops.h"
 #include "include/operation.h"
+#include "include/sevenzip.h"
+#include "include/error.h"
 
 #include <cstdio>
 #include <array>
@@ -40,203 +42,6 @@ namespace tui::archive_ops {
         extraction.content = extraction.success ? std::move(result.stdout_output) : "";
         extraction.empty_file = extraction.success && extraction.content.empty();
         return extraction;
-    }
-
-#ifdef _WIN32
-    static CommandResult run_command_capture_windows(const std::vector<std::string>& cmd) {
-        CommandResult result;
-        if (cmd.empty()) return result;
-
-        std::string tool = cmd[0];
-        std::string args_str;
-        for (size_t i = 1; i < cmd.size(); i++) {
-            args_str += " " + cmd[i];
-        }
-
-        SECURITY_ATTRIBUTES sa;
-        sa.nLength = sizeof(SECURITY_ATTRIBUTES);
-        sa.bInheritHandle = TRUE;
-        sa.lpSecurityDescriptor = NULL;
-
-        HANDLE hRead, hWrite;
-        if (!CreatePipe(&hRead, &hWrite, &sa, 0)) return result;
-        if (!SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0)) {
-            CloseHandle(hWrite);
-            CloseHandle(hRead);
-            return result;
-        }
-
-        STARTUPINFOA si;
-        ZeroMemory(&si, sizeof(si));
-        si.cb = sizeof(si);
-        si.hStdOutput = hWrite;
-        si.hStdError = hWrite;
-        si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-        si.dwFlags |= STARTF_USESTDHANDLES;
-
-        PROCESS_INFORMATION pi;
-        ZeroMemory(&pi, sizeof(pi));
-
-        std::string full_cmd = tool + args_str;
-        std::vector<char> cmd_buf(full_cmd.begin(), full_cmd.end());
-        cmd_buf.push_back('\0');
-
-        if (CreateProcessA(NULL, cmd_buf.data(), NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
-            CloseHandle(hWrite);
-            std::array<char, 4096> buffer;
-            DWORD bytes_read;
-            while (ReadFile(hRead, buffer.data(), static_cast<DWORD>(buffer.size()), &bytes_read, NULL) && bytes_read > 0) {
-                result.stdout_output.append(buffer.data(), bytes_read);
-            }
-            CloseHandle(hRead);
-            WaitForSingleObject(pi.hProcess, INFINITE);
-            DWORD exit_code;
-            GetExitCodeProcess(pi.hProcess, &exit_code);
-            result.exit_code = static_cast<int>(exit_code);
-            CloseHandle(pi.hProcess);
-            CloseHandle(pi.hThread);
-        } else {
-            CloseHandle(hWrite);
-            CloseHandle(hRead);
-        }
-
-        return result;
-    }
-
-    static int run_command_status_windows(const std::vector<std::string>& cmd) {
-        if (cmd.empty()) return -1;
-
-        std::string tool = cmd[0];
-        std::string args_str;
-        for (size_t i = 1; i < cmd.size(); i++) {
-            args_str += " " + cmd[i];
-        }
-
-        STARTUPINFOA si;
-        ZeroMemory(&si, sizeof(si));
-        si.cb = sizeof(si);
-
-        PROCESS_INFORMATION pi;
-        ZeroMemory(&pi, sizeof(pi));
-
-        std::string full_cmd = tool + args_str;
-        std::vector<char> cmd_buf(full_cmd.begin(), full_cmd.end());
-        cmd_buf.push_back('\0');
-
-        if (CreateProcessA(NULL, cmd_buf.data(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-            WaitForSingleObject(pi.hProcess, INFINITE);
-            DWORD exit_code;
-            GetExitCodeProcess(pi.hProcess, &exit_code);
-            CloseHandle(pi.hProcess);
-            CloseHandle(pi.hThread);
-            return static_cast<int>(exit_code);
-        }
-        return -1;
-    }
-#else
-    static CommandResult run_command_capture_posix(const std::vector<std::string>& cmd) {
-        CommandResult result;
-        if (cmd.empty()) return result;
-
-        std::vector<char*> argv;
-        for (const auto& arg : cmd) {
-            argv.push_back(const_cast<char*>(arg.c_str()));
-        }
-        argv.push_back(nullptr);
-
-        int pipefd[2];
-        if (pipe(pipefd) != 0) return result;
-
-        pid_t pid = fork();
-        if (pid == 0) {
-            close(pipefd[0]);
-            dup2(pipefd[1], STDOUT_FILENO);
-            dup2(pipefd[1], STDERR_FILENO);
-            close(pipefd[1]);
-
-            int devnull = open("/dev/null", O_RDONLY);
-            if (devnull >= 0) {
-                dup2(devnull, STDIN_FILENO);
-                close(devnull);
-            }
-
-            execvp(argv[0], argv.data());
-            _exit(127);
-        } else if (pid > 0) {
-            close(pipefd[1]);
-            std::array<char, 4096> buffer;
-            ssize_t bytes_read;
-            while ((bytes_read = read(pipefd[0], buffer.data(), buffer.size())) > 0) {
-                result.stdout_output.append(buffer.data(), bytes_read);
-            }
-            close(pipefd[0]);
-
-            int status;
-            waitpid(pid, &status, 0);
-            if (WIFEXITED(status)) {
-                result.exit_code = WEXITSTATUS(status);
-            } else {
-                result.exit_code = -1;
-            }
-        } else {
-            close(pipefd[0]);
-            close(pipefd[1]);
-        }
-
-        return result;
-    }
-
-    static int run_command_status_posix(const std::vector<std::string>& cmd) {
-        if (cmd.empty()) return -1;
-
-        std::vector<char*> argv;
-        for (const auto& arg : cmd) {
-            argv.push_back(const_cast<char*>(arg.c_str()));
-        }
-        argv.push_back(nullptr);
-
-        pid_t pid = fork();
-        if (pid == 0) {
-            int devnull = open("/dev/null", O_WRONLY);
-            if (devnull >= 0) {
-                dup2(devnull, STDOUT_FILENO);
-                dup2(devnull, STDERR_FILENO);
-                close(devnull);
-            }
-            devnull = open("/dev/null", O_RDONLY);
-            if (devnull >= 0) {
-                dup2(devnull, STDIN_FILENO);
-                close(devnull);
-            }
-
-            execvp(argv[0], argv.data());
-            _exit(127);
-        } else if (pid > 0) {
-            int status;
-            waitpid(pid, &status, 0);
-            if (WIFEXITED(status)) {
-                return WEXITSTATUS(status);
-            }
-            return -1;
-        }
-        return -1;
-    }
-#endif
-
-    CommandResult run_command_capture(const std::vector<std::string>& cmd) {
-#ifdef _WIN32
-        return run_command_capture_windows(cmd);
-#else
-        return run_command_capture_posix(cmd);
-#endif
-    }
-
-    int run_command_status(const std::vector<std::string>& cmd) {
-#ifdef _WIN32
-        return run_command_status_windows(cmd);
-#else
-        return run_command_status_posix(cmd);
-#endif
     }
 
     static bool is_tar_family(file_type::FileType type) {
@@ -290,28 +95,40 @@ namespace tui::archive_ops {
         return entries;
     }
 
-    static std::vector<ArchiveEntry> list_7z(const std::string& archive_path, const std::string& password) {
+    static std::vector<ArchiveEntry> list_7z(const std::string& archive_path, const std::string& password, const std::string& tool = "7z", bool report_errors = false) {
         std::vector<ArchiveEntry> entries;
-        std::vector<std::string> cmd = {"7z", "l", "-slt", archive_path};
+        std::vector<std::string> cmd = {tool, "l", "-slt", "-sccUTF-8", "--", fs::absolute(archive_path).string()};
         if (!password.empty()) {
             cmd.insert(cmd.begin() + 2, "-p" + password);
         }
 
         auto result = run_command_capture(cmd);
-        if (result.exit_code != 0) return entries;
+        if (result.exit_code != 0) {
+            if (report_errors) error::throw_error(error::ErrorCode::OPERATION_FAILED,
+                {{"COMMAND", tool + " l"}, {"EXIT_CODE", std::to_string(result.exit_code)}});
+            return entries;
+        }
 
         std::istringstream stream(result.stdout_output);
         std::string line;
         ArchiveEntry current;
         bool past_separator = false;
+        bool has_metadata = false;
+        auto finish_entry = [&]() {
+            if (has_metadata && current.path.empty() && report_errors) {
+                current.path = fs::path(archive_path).stem().string();
+                if (current.path.empty() || current.path == "." || current.path == "..") current.path = "content";
+            }
+            if (!current.path.empty()) entries.push_back(current);
+            current = ArchiveEntry{};
+            has_metadata = false;
+        };
 
         while (std::getline(stream, line)) {
             std::string trimmed = trim_str(line);
 
             if (trimmed.find("----------") != std::string::npos && trimmed.size() >= 10 && trimmed.find_first_not_of('-') == std::string::npos) {
-                if (!current.path.empty()) {
-                    entries.push_back(current);
-                }
+                finish_entry();
                 past_separator = true;
                 current = ArchiveEntry{};
                 continue;
@@ -320,18 +137,17 @@ namespace tui::archive_ops {
             if (!past_separator) continue;
 
             if (trimmed.empty()) {
-                if (!current.path.empty()) {
-                    entries.push_back(current);
-                    current = ArchiveEntry{};
-                }
+                finish_entry();
                 continue;
             }
 
-            size_t eq_pos = trimmed.find(" = ");
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            size_t eq_pos = line.find(" =");
             if (eq_pos == std::string::npos) continue;
 
-            std::string key = trim_str(trimmed.substr(0, eq_pos));
-            std::string value = trim_str(trimmed.substr(eq_pos + 3));
+            has_metadata = true;
+            std::string key = trim_str(line.substr(0, eq_pos));
+            std::string value = eq_pos + 3 <= line.size() ? line.substr(eq_pos + 3) : "";
 
             if (key == "Path") {
                 if (!current.path.empty()) {
@@ -354,9 +170,7 @@ namespace tui::archive_ops {
             }
         }
 
-        if (past_separator && !current.path.empty()) {
-            entries.push_back(current);
-        }
+        if (past_separator) finish_entry();
         return entries;
     }
 
@@ -478,6 +292,9 @@ namespace tui::archive_ops {
         std::vector<ArchiveEntry> entries;
 
         switch (type) {
+            case file_type::FileType::ARCHIVE_P7ZIP:
+                entries = list_7z(archive_path, password, sevenzip::require_executable(), true);
+                break;
             case file_type::FileType::ARCHIVE_TAR:
             case file_type::FileType::ARCHIVE_TAR_GZ:
             case file_type::FileType::ARCHIVE_TAR_BZ2:
@@ -552,8 +369,9 @@ namespace tui::archive_ops {
         return run_command_capture(cmd);
     }
 
-    static CommandResult extract_7z_command(const std::string& archive_path, const std::string& entry_path, const std::string& password) {
-        std::vector<std::string> cmd = {"7z", "e", "-so", archive_path, entry_path};
+    static CommandResult extract_7z_command(const std::string& archive_path, const std::string& entry_path, const std::string& password, const std::string& tool = "7z", bool generic = false) {
+        std::vector<std::string> cmd = {tool, "e", "-so", "-bse0", "-spd", "--", fs::absolute(archive_path).string()};
+        if (!generic || !sevenzip::is_stream_format(sevenzip::probe_format(archive_path, password))) cmd.push_back(entry_path);
         if (!password.empty()) {
             cmd.insert(cmd.begin() + 2, "-p" + password);
         }
@@ -587,6 +405,8 @@ namespace tui::archive_ops {
 
     TextExtractionResult extract_text(const std::string& archive_path, const std::string& entry_path, file_type::FileType type, const std::string& password) {
         switch (type) {
+            case file_type::FileType::ARCHIVE_P7ZIP:
+                return make_text_extraction_result(extract_7z_command(archive_path, entry_path, password, sevenzip::require_executable(), true));
             case file_type::FileType::ARCHIVE_TAR:
             case file_type::FileType::ARCHIVE_TAR_GZ:
             case file_type::FileType::ARCHIVE_TAR_BZ2:
@@ -645,6 +465,8 @@ namespace tui::archive_ops {
 
     std::string extract_to_string(const std::string& archive_path, const std::string& entry_path, file_type::FileType type, const std::string& password) {
         switch (type) {
+            case file_type::FileType::ARCHIVE_P7ZIP:
+                return make_text_extraction_result(extract_7z_command(archive_path, entry_path, password, sevenzip::require_executable(), true)).content;
             case file_type::FileType::ARCHIVE_TAR:
             case file_type::FileType::ARCHIVE_TAR_GZ:
             case file_type::FileType::ARCHIVE_TAR_BZ2:
@@ -726,8 +548,8 @@ namespace tui::archive_ops {
         return run_command_status(cmd) == 0;
     }
 
-    static bool extract_single_7z(const std::string& archive_path, const std::string& entry_path, const std::string& output_dir, const std::string& password) {
-        std::vector<std::string> cmd = {"7z", "x", archive_path, entry_path, "-o" + output_dir, "-y"};
+    static bool extract_single_7z(const std::string& archive_path, const std::string& entry_path, const std::string& output_dir, const std::string& password, const std::string& tool = "7z") {
+        std::vector<std::string> cmd = {tool, "x", "-spd", "-o" + fs::absolute(output_dir).string(), "-y", "--", fs::absolute(archive_path).string(), entry_path};
         if (!password.empty()) {
             cmd.insert(cmd.begin() + 2, "-p" + password);
         }
@@ -769,6 +591,19 @@ namespace tui::archive_ops {
 
     bool extract_single(const std::string& archive_path, const std::string& entry_path, const std::string& output_dir, file_type::FileType type, const std::string& password) {
         switch (type) {
+            case file_type::FileType::ARCHIVE_P7ZIP: {
+                const std::string tool = sevenzip::require_executable();
+                if (sevenzip::is_stream_format(sevenzip::probe_format(archive_path, password))) {
+                    if (entry_path.empty() || fs::path(entry_path).filename() != entry_path || entry_path == "." || entry_path == "..") return false;
+                    fs::create_directories(output_dir);
+                    const fs::path output_path = fs::path(output_dir) / entry_path;
+                    if (fs::is_symlink(fs::symlink_status(output_path))) return false;
+                    return process::run_command_to_file(
+                        {tool, "e", "-so", "-bse0", password.empty() ? "-p-" : "-p" + password,
+                         "--", fs::absolute(archive_path).string()}, output_path.string());
+                }
+                return extract_single_7z(archive_path, entry_path, output_dir, password, tool);
+            }
             case file_type::FileType::ARCHIVE_TAR:
             case file_type::FileType::ARCHIVE_TAR_GZ:
             case file_type::FileType::ARCHIVE_TAR_BZ2:

@@ -11,7 +11,7 @@
 
 ## Highlights
 
-- Detects archive formats by file signature instead of filename extension.
+- Detects original formats by extension/signature and probes additional containers with p7zip/7-Zip.
 - Uses one command for compression, extraction, verification, and archive browsing.
 - Includes a TUI archive browser for listing, searching, previewing, extracting, editing, and playing audio entries.
 - Supports tar, gzip, bzip2, xz, zip, 7z, rar, lz4, zstd, and xar.
@@ -139,6 +139,57 @@ hitpag --exclude='*.tmp' --exclude='node_modules/*' clean.tar.gz ./project/
 | lz4 | yes | yes | no | Single-file compression |
 | zstd | yes | yes | no | Single-file compression |
 | xar | yes | yes | no | macOS archive format |
+
+
+The original rows above keep their existing compression/extraction backends. The additional formats below use **p7zip/7-Zip** (`7z`, then `7zz`, then `7za` on PATH). `7za` supports fewer formats; a full `7z`/`7zz` installation is recommended. “yes*” means that the installed backend must include the corresponding reader/codec; it does not promise support for every variant.
+
+| Additional format / extensions | Compress | Extract / TUI | Password | Notes |
+|--------------------------------|----------|---------------|----------|-------|
+| gzip (`gz`, `gzip`) | yes* | yes* | no | One regular file, not a directory; distinct from tar.gz |
+| bzip2 (`bz2`, `bzip2`) | yes* | yes* | no | One regular file; distinct from tar.bz2 |
+| xz | yes* | yes* | no | One regular file; distinct from tar.xz |
+| WIM (`wim`) | yes* | yes* | no | Files/directories; codec support varies |
+| WIM variants (`swm`, `esd`, `ppkg`) | no | yes* | no | Does not create split WIM or installation packages |
+| ZIP containers (`zipx`, `jar`, `xpi`, `odt`, `ods`, `docx`, `xlsx`, `pptx`, `epub`, `ipa`, `apk`, `appx`, `msix`) | yes* | yes* | yes* | Creates a ZIP container only; no application packaging, manifests, or signing |
+| OVA (`ova`) | yes* | yes* | no | Creates a TAR container only; no virtual appliance metadata |
+| Lizard (`liz`), LZ5 (`lz5`) | yes* | yes* | no | Optional p7zip codecs; one regular file |
+| compressed SWF (`swf`, `--format=swfc`) | yes* | yes* | no | Creation requires one valid uncompressed SWF file |
+| AR (`ar`, `a`, `deb`, `lib`) | no | yes* | no | Includes Debian package containers; nested archives need a second extraction |
+| ARJ (`arj`) | no | yes* | backend-dependent | Reader capabilities apply |
+| CAB (`cab`) | no | yes* | no | Cabinet archives |
+| CHM / HXS (`chm`, `chi`, `chq`, `chw`, `hxs`, `hxi`, `hxr`, `hxq`, `hxw`, `lit`) | no | yes* | no | Help/document containers |
+| Compound (`msi`, `msp`, `doc`, `xls`, `ppt`) | no | yes* | no | Lists embedded streams, not decrypted document contents |
+| CPIO (`cpio`), RPM (`rpm`) | no | yes* | no | Package/archive readers |
+| DMG (`dmg`) | no | yes* | backend-dependent | Supported disk image variants only |
+| ISO / UDF (`iso`, `udf`, `img`) | no | yes* | no | IMG format is detected by the backend |
+| APFS, APM, GPT, MBR (`apfs`, `apm`, `gpt`, `mbr`) | no | yes* | no | APFS requires a newer backend |
+| Ext, FAT, HFS, NTFS (`ext`, `ext2`, `ext3`, `ext4`, `fat`, `hfs`, `hfsx`, `ntfs`, `img`) | no | yes* | no | Filesystem images; no mounting |
+| CramFS / SquashFS (`cramfs`, `squashfs`) | no | yes* | no | Filesystem images |
+| QCOW / VDI / VHD / VHDX / VMDK (`qcow`, `qcow2`, `qcow2c`, `vdi`, `vhd`, `vhdx`, `vmdk`) | no | yes* | no | VHDX requires a backend with its reader |
+| LZH (`lzh`, `lha`) | no | yes* | backend-dependent | Reader capabilities apply |
+| LZMA / LZMA86 / PPMd / lzip (`lzma`, `lzma86`, `pmd`, `lz`) | no | yes* | no | Standalone compressed streams |
+| Unix compress / MsLZ (`z`, `mslz`) | no | yes* | no | Standalone compressed streams |
+| RAR first volume (`r00`) | no | yes* | yes* | Keep all volumes together; normal `.rar` keeps its original backend |
+| Split (`001`) | no | yes* | inherited | Open the first volume with all parts in one directory |
+| PE / NSIS / SFX (`exe`, `dll`, `sys`, `nsis`) | no | yes* | backend-dependent | Inspects supported sections/payloads; never runs the executable |
+| ELF / Mach-O / TE / Mub (`elf`, `macho`, `te`, `mub`) | no | yes* | no | Executable containers/sections |
+| FLV / SWF (`flv`, uncompressed `swf`) | no | yes* | no | Container contents, not media playback/transcoding |
+| IHex / UEFI (`ihex`, `scap`, `uefif`) | no | yes* | no | Supported firmware containers |
+| XAR aliases (`pkg`, `xip`) | no | yes* | no | Normal `.xar` keeps its original backend |
+| Compressed TAR aliases (`tpz`, `taz`, `tliz`, `tlz`, `tlz4`, `tlz5`, `tzstd`) | no | yes* | no | Extracts the outer stream; open the resulting TAR separately |
+
+Unknown extensions and extensionless files are also probed with the installed backend, so additional readers can work without adding another extension here. Known original formats keep their original dispatch. An EXE filename alone does not guarantee readable contents: proprietary/encrypted installers or BIOS packages may remain unsupported. Empty/corrupt archives and unsupported codecs can fail; hitpag does not run installers to unpack them. The general upstream format list is available on the [7-Zip website](https://www.7-zip.org/); run `7z i` (or `7zz i`) to inspect your installed build.
+
+For added formats, one archive argument opens the TUI, a directory target extracts, and an archive-extension target creates a new archive. Single-file streams require exactly one regular input file; archive a directory as TAR first. TUI editing does **not** write changes back into the added formats. Names absent from stream metadata are synthesized for browsing/selected extraction; full CLI extraction uses the backend's naming.
+
+```bash
+hitpag BIOS-8JCN56WW.exe          # Browse if the backend can read this EXE
+hitpag disk.iso extracted        # Extract into a directory
+hitpag document.txt document.xz  # Create a single-file XZ stream
+hitpag folder backup.wim         # Create a WIM archive
+hitpag movie.swf compressed.swf  # Compress a valid uncompressed SWF
+hitpag --format=gzip input.txt output.gz
+```
 
 ---
 

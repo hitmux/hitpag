@@ -47,6 +47,8 @@ add_executable(hitpag
     src/lib/error.cpp
     src/lib/progress.cpp
     src/lib/file_filter.cpp
+    src/lib/process.cpp
+    src/lib/sevenzip.cpp
     src/lib/file_type.cpp
     src/lib/args.cpp
     src/lib/operation.cpp
@@ -70,6 +72,8 @@ add_executable(tui_smoke_test
     src/lib/args.cpp
     src/lib/error.cpp
     src/lib/i18n.cpp
+    src/lib/process.cpp
+    src/lib/sevenzip.cpp
     src/lib/file_type.cpp
     src/lib/operation.cpp
     src/lib/progress.cpp
@@ -101,3 +105,23 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_L
 endif()
 
 install(TARGETS hitpag DESTINATION bin)
+
+add_executable(sevenzip_test
+    tests/sevenzip_test.cpp
+    src/lib/args.cpp
+    src/lib/error.cpp
+    src/lib/i18n.cpp
+    src/lib/process.cpp
+    src/lib/sevenzip.cpp
+    src/lib/file_type.cpp
+    src/lib/operation.cpp
+    src/lib/progress.cpp
+    src/lib/tui_archive_ops.cpp
+)
+target_include_directories(sevenzip_test PRIVATE src)
+target_link_libraries(sevenzip_test PRIVATE Threads::Threads)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
+    target_link_libraries(sevenzip_test PRIVATE stdc++fs)
+endif()
+add_test(NAME sevenzip_test COMMAND sevenzip_test $<TARGET_FILE:hitpag>)
+set_tests_properties(sevenzip_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)

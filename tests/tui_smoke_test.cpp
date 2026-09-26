@@ -239,7 +239,7 @@ int main() {
     ok &= test_tui_args();
     ok &= test_tui_i18n_keys();
 
-    ScopedTestDir tmp_root("/opt/hitpag/tmp/tui_smoke_test");
+    ScopedTestDir tmp_root(fs::current_path() / "tui_smoke_test_data");
     if (!tmp_root.valid()) {
         std::cerr << "FAIL: unable to create test directory: " << tmp_root.error() << std::endl;
         return 1;

@@ -7,6 +7,7 @@
 #include "include/operation.h"
 #include "include/error.h"
 #include "include/i18n.h"
+#include "include/sevenzip.h"
 
 #include <filesystem>
 #include <iostream>
@@ -174,11 +175,15 @@ namespace operation {
         return exit_code;
     }
 
-    bool verify_archive(const std::string& archive_path, file_type::FileType format) {
+    bool verify_archive(const std::string& archive_path, file_type::FileType format, const std::string& password) {
         std::string tool;
         std::vector<std::string> args;
 
         switch (format) {
+            case file_type::FileType::ARCHIVE_P7ZIP:
+                tool = sevenzip::require_executable();
+                args = {"t", password.empty() ? "-p-" : "-p" + password, "--", fs::absolute(archive_path).string()};
+                break;
             case file_type::FileType::ARCHIVE_TAR:
             case file_type::FileType::ARCHIVE_TAR_GZ:
             case file_type::FileType::ARCHIVE_TAR_BZ2:
@@ -330,6 +335,32 @@ namespace operation {
         }
 
         switch (target_format) {
+            case file_type::FileType::ARCHIVE_P7ZIP: {
+                std::string format = options.force_format.empty()
+                    ? sevenzip::creation_format(fs::path(target_path_str).extension().string())
+                    : sevenzip::creation_format(options.force_format);
+                if (!sevenzip::can_create(format)) {
+                    error::throw_error(error::ErrorCode::UNKNOWN_FORMAT,
+                        {{"INFO", "This added format is read-only or ambiguous. Choose a writable format (gzip, bzip2, xz, wim, zip, tar, lizard, lz5 or swfc)."}});
+                }
+                if (sevenzip::single_file_format(format) &&
+                    (canonical_sources.size() != 1 || is_directory_flags.front())) {
+                    error::throw_error(error::ErrorCode::INVALID_SOURCE,
+                        {{"PATH", sources.front().path}, {"REASON", "This format requires exactly one regular file; create a TAR first for directories or multiple files."}});
+                }
+                if (!password.empty() && !sevenzip::supports_password(format)) {
+                    error::throw_error(error::ErrorCode::UNKNOWN_FORMAT,
+                        {{"INFO", "The selected format does not support password-protected creation."}});
+                }
+                tool = sevenzip::require_executable();
+                args = {"a", "-t" + format, "-spd"};
+                if (!password.empty()) args.push_back("-p" + password);
+                if (options.compression_level > 0) args.push_back("-mx=" + std::to_string(options.compression_level));
+                args.push_back("--");
+                args.push_back(fs::absolute(target_path_str).string());
+                for (const auto& item : items_to_archive) args.push_back("./" + item);
+                break;
+            }
             case file_type::FileType::ARCHIVE_TAR:
             case file_type::FileType::ARCHIVE_TAR_GZ:
             case file_type::FileType::ARCHIVE_TAR_BZ2:
@@ -433,7 +464,7 @@ namespace operation {
 
         if (options.verify) {
             std::cout << i18n::get("verifying") << std::endl;
-            if (verify_archive(target_path_str, target_format)) {
+            if (verify_archive(target_path_str, target_format, password)) {
                 std::cout << i18n::get("verification_success") << std::endl;
             } else {
                 std::cout << i18n::get("verification_failed") << std::endl;
@@ -467,6 +498,12 @@ namespace operation {
         std::vector<std::string> args;
 
         switch (source_type) {
+            case file_type::FileType::ARCHIVE_P7ZIP:
+                tool = sevenzip::require_executable();
+                args = {"x", "-y", "-o" + fs::absolute(target_dir_path).string()};
+                if (!password.empty()) args.push_back("-p" + password);
+                args.insert(args.end(), {"--", fs::absolute(source_path).string()});
+                break;
             case file_type::FileType::ARCHIVE_TAR:
             case file_type::FileType::ARCHIVE_TAR_GZ:
             case file_type::FileType::ARCHIVE_TAR_BZ2:
