@@ -6,6 +6,7 @@
 
 #include "include/file_type.h"
 #include "include/error.h"
+#include "include/sevenzip.h"
 
 #include <filesystem>
 #include <fstream>
@@ -51,6 +52,7 @@ namespace file_type {
         }
 
         if (ext == ".zst" || ext == ".zstd") return FileType::ARCHIVE_ZSTD;
+        if (!sevenzip::format_for_extension(ext).empty()) return FileType::ARCHIVE_P7ZIP;
         return FileType::UNKNOWN;
     }
 
@@ -59,7 +61,7 @@ namespace file_type {
         if (!file) return FileType::UNKNOWN;
         std::array<char, 16> header{};
         file.read(header.data(), header.size());
-        if(file.gcount() < 4 || file.fail()) return FileType::UNKNOWN;
+        if(file.gcount() < 4) return FileType::UNKNOWN;
 
         if (header[0] == 0x50 && header[1] == 0x4B) {
             if ((header[2] == 0x03 && header[3] == 0x04) ||
@@ -81,7 +83,7 @@ namespace file_type {
 
         if (file.gcount() >= 6 && header[0] == (char)0xFD && header[1] == 0x37 && header[2] == 0x7A &&
             header[3] == 0x58 && header[4] == 0x5A && header[5] == 0x00) {
-            return FileType::ARCHIVE_TAR_XZ;
+            return FileType::ARCHIVE_P7ZIP;
         }
 
         if (header[0] == 0x04 && header[1] == 0x22 && header[2] == 0x4D && header[3] == 0x18) {
@@ -106,22 +108,21 @@ namespace file_type {
         std::array<char, 512> tar_block{};
         file.read(tar_block.data(), tar_block.size());
         if (file.gcount() >= 512) {
-            bool looks_like_tar = true;
-            bool has_filename = false;
-
-            for (int i = 0; i < 100; ++i) {
-                if (tar_block[i] != 0) {
-                    has_filename = true;
-                    if (tar_block[i] < 32 || tar_block[i] > 126) {
-                        looks_like_tar = false;
-                        break;
-                    }
-                }
+            unsigned int checksum = 0;
+            for (size_t i = 0; i < tar_block.size(); ++i) {
+                checksum += (i >= 148 && i < 156) ? ' ' : static_cast<unsigned char>(tar_block[i]);
             }
-
-            if (looks_like_tar && has_filename) {
-                return FileType::ARCHIVE_TAR;
+            unsigned int stored = 0;
+            bool has_digit = false;
+            bool valid = true;
+            for (size_t i = 148; i < 156; ++i) {
+                char c = tar_block[i];
+                if (c == ' ' || c == '\0') continue;
+                if (c < '0' || c > '7') { valid = false; break; }
+                has_digit = true;
+                stored = stored * 8 + (c - '0');
             }
+            if (valid && has_digit && checksum == stored) return FileType::ARCHIVE_TAR;
         }
 
         return FileType::UNKNOWN;
@@ -143,6 +144,9 @@ namespace file_type {
             if (type == FileType::UNKNOWN || type == FileType::REGULAR_FILE) {
                 type = recognize_by_header(source_path_str);
             }
+            if (type == FileType::UNKNOWN && sevenzip::recognizes(source_path_str)) {
+                type = FileType::ARCHIVE_P7ZIP;
+            }
             return (type == FileType::UNKNOWN) ? FileType::REGULAR_FILE : type;
         }
 
@@ -160,7 +164,8 @@ namespace file_type {
 
         bool target_is_archive = (result.target_type_hint != FileType::UNKNOWN && result.target_type_hint != FileType::REGULAR_FILE && result.target_type_hint != FileType::DIRECTORY);
 
-        if (result.source_type == FileType::DIRECTORY || result.source_type == FileType::REGULAR_FILE) {
+        if (result.source_type == FileType::DIRECTORY || result.source_type == FileType::REGULAR_FILE ||
+            (result.source_type == FileType::ARCHIVE_P7ZIP && target_is_archive)) {
             result.operation = OperationType::COMPRESS;
         } else {
             result.operation = OperationType::DECOMPRESS;
@@ -181,6 +186,7 @@ namespace file_type {
             {FileType::ARCHIVE_ZIP, "ZIP Archive"}, {FileType::ARCHIVE_RAR, "RAR Archive"},
             {FileType::ARCHIVE_7Z, "7Z Archive"}, {FileType::ARCHIVE_LZ4, "LZ4 Archive"},
             {FileType::ARCHIVE_ZSTD, "ZSTD Archive"}, {FileType::ARCHIVE_XAR, "XAR Archive"},
+            {FileType::ARCHIVE_P7ZIP, "7-Zip supported archive/container"},
             {FileType::UNKNOWN, "Unknown Type"}
         };
         auto it = type_map.find(type);
@@ -202,6 +208,7 @@ namespace file_type {
         if (fmt == "lz4") return FileType::ARCHIVE_LZ4;
         if (fmt == "zstd" || fmt == "zst") return FileType::ARCHIVE_ZSTD;
         if (fmt == "xar") return FileType::ARCHIVE_XAR;
+        if (!sevenzip::normalize_format(fmt).empty()) return FileType::ARCHIVE_P7ZIP;
 
         return FileType::UNKNOWN;
     }
