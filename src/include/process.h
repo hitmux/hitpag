@@ -17,6 +17,8 @@ namespace process {
     };
     CommandResult run_command_capture(const std::vector<std::string>& cmd,
                                      size_t max_output = std::numeric_limits<size_t>::max());
+    // Writes to a same-directory temporary file and replaces path only after
+    // the command exits successfully and the output is flushed.
     bool run_command_to_file(const std::vector<std::string>& cmd, const std::string& path);
     int run_command_status(const std::vector<std::string>& cmd);
 }

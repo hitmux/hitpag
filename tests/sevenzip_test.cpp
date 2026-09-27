@@ -71,6 +71,29 @@ static void check_archive(const fs::path& path, const std::string& payload, cons
 static void append_le(std::string& data, unsigned value, int bytes) {
     for (int i = 0; i < bytes; ++i) { data += static_cast<char>(value & 255); value >>= 8; }
 }
+
+static void test_transactional_output(const fs::path& temp) {
+    const fs::path destination = temp / "existing-output.bin";
+    const std::string original = "original bytes must survive failure\n";
+    write(destination, original);
+#ifdef _WIN32
+    const auto result = process::run_command_to_file(
+        {"cmd.exe", "/C", "echo partial & exit /B 7"}, destination.string());
+#else
+    const auto result = process::run_command_to_file(
+        {"sh", "-c", "printf partial; exit 7"}, destination.string());
+#endif
+    require(!result, "failed command must report failure");
+    require(read(destination) == original, "failed extraction must preserve the destination");
+    for (const auto& item : fs::directory_iterator(temp)) {
+        const std::string name = item.path().filename().string();
+        require(name.find("existing-output.bin.hitpag-tmp-") != 0,
+                "temporary output must be removed after failure");
+        require(name.find("existing-output.bin.hitpag-old-") != 0,
+                "backup output must be removed after failure");
+    }
+}
+
 static void make_cab(const fs::path& path, const std::string& payload) {
     const std::string name = "payload.txt";
     unsigned data_offset = 44 + 16 + name.size() + 1;
@@ -108,6 +131,7 @@ int main(int argc, char** argv) {
         fs::path text = temp.path / "long.txt";
         write(text, std::string(1024, 'a'));
         require(file_type::recognize_by_header(text.string()) == FileType::UNKNOWN, "plain text is not TAR");
+        test_transactional_output(temp.path);
         const std::string tool = sevenzip::executable();
         if (tool.empty()) { std::cout << "SKIP: 7z/7zz/7za not installed\n"; return 77; }
         for (const std::string ext : {"gz", "bz2", "xz", "wim", "jar", "ova"}) {
@@ -116,6 +140,20 @@ int main(int argc, char** argv) {
             check_archive(archive, payload, cli);
             std::cout << "PASS: " << ext << '\n';
         }
+        // A failed single-stream extraction must leave a pre-existing file intact.
+        fs::path broken_stream = temp.path / "broken-stream.bz2";
+        fs::copy_file(temp.path / "archive with spaces.bz2", broken_stream);
+        auto broken_entries = ops::list_archive(broken_stream.string(), FileType::ARCHIVE_P7ZIP);
+        require(!broken_entries.empty(), "list stream before corruption");
+        const std::string broken_entry = broken_entries.front().path;
+        fs::path broken_output = temp.path / "broken-output";
+        fs::create_directories(broken_output);
+        write(broken_output / broken_entry, "keep this file on decode failure");
+        fs::resize_file(broken_stream, 1);
+        require(!ops::extract_single(broken_stream.string(), broken_entry, broken_output.string(), FileType::ARCHIVE_P7ZIP),
+                "corrupt stream extraction fails");
+        require(read(broken_output / broken_entry) == "keep this file on decode failure",
+                "corrupt stream extraction preserves an existing file");
         // Optional codecs depend on the p7zip build.
         for (const std::string ext : {"liz", "lz5"}) {
             fs::path archive = temp.path / ("optional." + ext);
@@ -189,10 +227,16 @@ int main(int argc, char** argv) {
         fs::path fallback_dir = temp.path / "fallback-bin";
         fs::create_directory(fallback_dir);
         fs::create_symlink(backend_path, fallback_dir / "7zz");
+        write(fallback_dir / "7z", "#!/bin/sh\nexit 2\n");
+        fs::permissions(fallback_dir / "7z",
+                        fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write,
+                        fs::perm_options::add);
         {
             ScopedPath path(fallback_dir.string());
-            require(sevenzip::executable() == "7zz", "7zz fallback discovery");
-            require(!ops::list_archive(cab.string(), FileType::ARCHIVE_P7ZIP).empty(), "7zz fallback listing");
+            require(sevenzip::executable() == "7z", "preferred 7z discovery");
+            require(!ops::list_archive(cab.string(), FileType::ARCHIVE_P7ZIP).empty(), "fallback after unsupported 7z");
+            const auto candidates = sevenzip::backend_candidates(cab.string());
+            require(!candidates.empty() && candidates.front() == "7zz", "successful backend is cached");
         }
         {
             ScopedPath path("");

@@ -9,6 +9,8 @@
 #include <array>
 #include <cerrno>
 #include <fstream>
+#include <chrono>
+#include <filesystem>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -208,7 +210,30 @@ namespace process {
     }
 
     bool run_command_to_file(const std::vector<std::string>& cmd, const std::string& path) {
-        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        namespace fs = std::filesystem;
+        const fs::path destination(path);
+        std::error_code ec;
+        const fs::path parent = destination.parent_path().empty() ? fs::current_path(ec) : destination.parent_path();
+        if (ec) return false;
+        fs::create_directories(parent, ec);
+        if (ec) return false;
+
+        // Keep the destination untouched until the child has exited successfully
+        // and the temporary file has been flushed and closed. This matters for
+        // wrong passwords, corrupt streams and codecs that fail after emitting
+        // a prefix of the decoded data.
+        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+#ifdef _WIN32
+        const auto pid = static_cast<unsigned long>(GetCurrentProcessId());
+#else
+        const auto pid = static_cast<unsigned long>(getpid());
+#endif
+        const fs::path temporary = parent / (destination.filename().string() + ".hitpag-tmp-" +
+                                             std::to_string(pid) + "-" + std::to_string(stamp));
+        const fs::path backup = parent / (destination.filename().string() + ".hitpag-old-" +
+                                          std::to_string(pid) + "-" + std::to_string(stamp));
+
+        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
         if (!output) return false;
 #ifdef _WIN32
         auto result = run_command_capture_windows(cmd, 0, &output);
@@ -216,7 +241,44 @@ namespace process {
         auto result = run_command_capture_posix(cmd, 0, &output);
 #endif
         output.flush();
-        return result.exit_code == 0 && output.good();
+        const bool child_succeeded = result.exit_code == 0 && output.good();
+        output.close();
+        if (!child_succeeded || !output) {
+            fs::remove(temporary, ec);
+            return false;
+        }
+
+#ifdef _WIN32
+        // Windows rename refuses an existing destination, so move the old file
+        // aside and restore it on failure.
+        const bool had_destination = fs::exists(destination, ec) && !ec;
+        if (had_destination) {
+            fs::rename(destination, backup, ec);
+            if (ec) {
+                fs::remove(temporary, ec);
+                return false;
+            }
+        }
+        fs::rename(temporary, destination, ec);
+        if (ec) {
+            if (had_destination) {
+                std::error_code restore_ec;
+                fs::rename(backup, destination, restore_ec);
+            }
+            fs::remove(temporary, ec);
+            return false;
+        }
+        if (had_destination) fs::remove(backup, ec);
+#else
+        // rename(2) replaces the destination atomically when both paths share
+        // the same directory, so the old file remains visible until commit.
+        fs::rename(temporary, destination, ec);
+        if (ec) {
+            fs::remove(temporary, ec);
+            return false;
+        }
+#endif
+        return true;
     }
 
     int run_command_status(const std::vector<std::string>& cmd) {

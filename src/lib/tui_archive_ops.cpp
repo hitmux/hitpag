@@ -95,82 +95,118 @@ namespace tui::archive_ops {
         return entries;
     }
 
-    static std::vector<ArchiveEntry> list_7z(const std::string& archive_path, const std::string& password, const std::string& tool = "7z", bool report_errors = false) {
-        std::vector<ArchiveEntry> entries;
-        std::vector<std::string> cmd = {tool, "l", "-slt", "-sccUTF-8", "--", fs::absolute(archive_path).string()};
-        if (!password.empty()) {
-            cmd.insert(cmd.begin() + 2, "-p" + password);
+    static std::vector<std::string> sevenzip_tool_candidates(const std::string& archive_path,
+                                                               const std::string& password,
+                                                               const std::string& preferred = "") {
+        std::vector<std::string> tools;
+        if (!preferred.empty() && operation::is_tool_available(preferred)) {
+            tools.push_back(preferred);
         }
+        for (const auto& tool : sevenzip::backend_candidates(archive_path, password)) {
+            if (std::find(tools.begin(), tools.end(), tool) == tools.end()) tools.push_back(tool);
+        }
+        return tools;
+    }
 
-        auto result = run_command_capture(cmd);
-        if (result.exit_code != 0) {
-            if (report_errors) error::throw_error(error::ErrorCode::OPERATION_FAILED,
-                {{"COMMAND", tool + " l"}, {"EXIT_CODE", std::to_string(result.exit_code)}});
+    static std::vector<ArchiveEntry> list_7z(const std::string& archive_path,
+                                             const std::string& password,
+                                             const std::string& preferred_tool = "",
+                                             bool report_errors = false) {
+        std::vector<ArchiveEntry> entries;
+        const auto tools = sevenzip_tool_candidates(archive_path, password, preferred_tool);
+        int last_exit_code = -1;
+        std::string last_tool;
+
+        for (const auto& tool : tools) {
+            std::vector<std::string> cmd = {tool, "l", "-slt", "-sccUTF-8", "--", fs::absolute(archive_path).string()};
+            if (!password.empty()) cmd.insert(cmd.begin() + 2, "-p" + password);
+
+            auto result = run_command_capture(cmd);
+            last_exit_code = result.exit_code;
+            last_tool = tool;
+            if (result.exit_code != 0) continue;
+
+            std::istringstream stream(result.stdout_output);
+            std::string line;
+            ArchiveEntry current;
+            bool past_separator = false;
+            bool has_metadata = false;
+            std::string reported_format;
+            auto finish_entry = [&]() {
+                if (has_metadata && current.path.empty() && report_errors) {
+                    current.path = fs::path(archive_path).stem().string();
+                    if (current.path.empty() || current.path == "." || current.path == "..") current.path = "content";
+                }
+                if (!current.path.empty()) entries.push_back(current);
+                current = ArchiveEntry{};
+                has_metadata = false;
+            };
+
+            while (std::getline(stream, line)) {
+                std::string trimmed = trim_str(line);
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+                if (!past_separator && line.rfind("Type = ", 0) == 0 && line.size() > 7) {
+                    reported_format = line.substr(7);
+                }
+
+                if (trimmed.find("----------") != std::string::npos && trimmed.size() >= 10 && trimmed.find_first_not_of('-') == std::string::npos) {
+                    finish_entry();
+                    past_separator = true;
+                    current = ArchiveEntry{};
+                    continue;
+                }
+
+                if (!past_separator) continue;
+                if (trimmed.empty()) {
+                    finish_entry();
+                    continue;
+                }
+
+                size_t eq_pos = line.find(" =");
+                if (eq_pos == std::string::npos) continue;
+
+                has_metadata = true;
+                std::string key = trim_str(line.substr(0, eq_pos));
+                std::string value = eq_pos + 3 <= line.size() ? line.substr(eq_pos + 3) : "";
+
+                if (key == "Path") {
+                    if (!current.path.empty()) {
+                        entries.push_back(current);
+                        current = ArchiveEntry{};
+                    }
+                    current.path = value;
+                } else if (key == "Folder") {
+                    current.is_directory = (value == "+");
+                } else if (key == "Size") {
+                    try { current.size = std::stoull(value); } catch (...) {}
+                } else if (key == "Packed Size") {
+                    try { current.compressed_size = std::stoull(value); } catch (...) {}
+                } else if (key == "Modified") {
+                    current.modified = value;
+                } else if (key == "Method") {
+                    current.method = value;
+                } else if (key == "CRC") {
+                    try { current.crc = std::stoul(value, nullptr, 16); } catch (...) {}
+                }
+            }
+
+            if (past_separator) finish_entry();
+            if (!reported_format.empty()) {
+                sevenzip::remember_probe(archive_path, password, tool, reported_format);
+            } else {
+                sevenzip::remember_backend(archive_path, password, tool);
+            }
             return entries;
         }
 
-        std::istringstream stream(result.stdout_output);
-        std::string line;
-        ArchiveEntry current;
-        bool past_separator = false;
-        bool has_metadata = false;
-        auto finish_entry = [&]() {
-            if (has_metadata && current.path.empty() && report_errors) {
-                current.path = fs::path(archive_path).stem().string();
-                if (current.path.empty() || current.path == "." || current.path == "..") current.path = "content";
+        if (report_errors) {
+            if (tools.empty()) {
+                (void)sevenzip::require_executable();
             }
-            if (!current.path.empty()) entries.push_back(current);
-            current = ArchiveEntry{};
-            has_metadata = false;
-        };
-
-        while (std::getline(stream, line)) {
-            std::string trimmed = trim_str(line);
-
-            if (trimmed.find("----------") != std::string::npos && trimmed.size() >= 10 && trimmed.find_first_not_of('-') == std::string::npos) {
-                finish_entry();
-                past_separator = true;
-                current = ArchiveEntry{};
-                continue;
-            }
-
-            if (!past_separator) continue;
-
-            if (trimmed.empty()) {
-                finish_entry();
-                continue;
-            }
-
-            if (!line.empty() && line.back() == '\r') line.pop_back();
-            size_t eq_pos = line.find(" =");
-            if (eq_pos == std::string::npos) continue;
-
-            has_metadata = true;
-            std::string key = trim_str(line.substr(0, eq_pos));
-            std::string value = eq_pos + 3 <= line.size() ? line.substr(eq_pos + 3) : "";
-
-            if (key == "Path") {
-                if (!current.path.empty()) {
-                    entries.push_back(current);
-                    current = ArchiveEntry{};
-                }
-                current.path = value;
-            } else if (key == "Folder") {
-                current.is_directory = (value == "+");
-            } else if (key == "Size") {
-                try { current.size = std::stoull(value); } catch (...) {}
-            } else if (key == "Packed Size") {
-                try { current.compressed_size = std::stoull(value); } catch (...) {}
-            } else if (key == "Modified") {
-                current.modified = value;
-            } else if (key == "Method") {
-                current.method = value;
-            } else if (key == "CRC") {
-                try { current.crc = std::stoul(value, nullptr, 16); } catch (...) {}
-            }
+            error::throw_error(error::ErrorCode::OPERATION_FAILED,
+                {{"COMMAND", last_tool.empty() ? "7z l" : last_tool + " l"},
+                 {"EXIT_CODE", std::to_string(last_exit_code)}});
         }
-
-        if (past_separator) finish_entry();
         return entries;
     }
 
@@ -293,7 +329,7 @@ namespace tui::archive_ops {
 
         switch (type) {
             case file_type::FileType::ARCHIVE_P7ZIP:
-                entries = list_7z(archive_path, password, sevenzip::require_executable(), true);
+                entries = list_7z(archive_path, password, "", true);
                 break;
             case file_type::FileType::ARCHIVE_TAR:
             case file_type::FileType::ARCHIVE_TAR_GZ:
@@ -304,7 +340,7 @@ namespace tui::archive_ops {
                 break;
 
             case file_type::FileType::ARCHIVE_7Z:
-                if (operation::is_tool_available("7z")) {
+                if (!sevenzip::executables().empty()) {
                     entries = list_7z(archive_path, password);
                 }
                 break;
@@ -312,13 +348,13 @@ namespace tui::archive_ops {
             case file_type::FileType::ARCHIVE_RAR:
                 if (operation::is_tool_available("unrar")) {
                     entries = list_rar(archive_path, password);
-                } else if (operation::is_tool_available("7z")) {
+                } else if (!sevenzip::executables().empty()) {
                     entries = list_7z(archive_path, password);
                 }
                 break;
 
             case file_type::FileType::ARCHIVE_ZIP:
-                if (operation::is_tool_available("7z")) {
+                if (!sevenzip::executables().empty()) {
                     entries = list_7z(archive_path, password);
                 } else if (operation::is_tool_available("unzip")) {
                     entries = list_unzip(archive_path, password);
@@ -369,13 +405,25 @@ namespace tui::archive_ops {
         return run_command_capture(cmd);
     }
 
-    static CommandResult extract_7z_command(const std::string& archive_path, const std::string& entry_path, const std::string& password, const std::string& tool = "7z", bool generic = false) {
-        std::vector<std::string> cmd = {tool, "e", "-so", "-bse0", "-spd", "--", fs::absolute(archive_path).string()};
-        if (!generic || !sevenzip::is_stream_format(sevenzip::probe_format(archive_path, password))) cmd.push_back(entry_path);
-        if (!password.empty()) {
-            cmd.insert(cmd.begin() + 2, "-p" + password);
+    static CommandResult extract_7z_command(const std::string& archive_path,
+                                             const std::string& entry_path,
+                                             const std::string& password,
+                                             const std::string& preferred_tool = "",
+                                             bool generic = false) {
+        const std::string format = generic ? sevenzip::probe_format(archive_path, password) : std::string{};
+        const auto tools = sevenzip_tool_candidates(archive_path, password, preferred_tool);
+        CommandResult last_result;
+        for (const auto& tool : tools) {
+            std::vector<std::string> cmd = {tool, "e", "-so", "-bse0", "-spd", "--", fs::absolute(archive_path).string()};
+            if (!generic || !sevenzip::is_stream_format(format)) cmd.push_back(entry_path);
+            if (!password.empty()) cmd.insert(cmd.begin() + 2, "-p" + password);
+            last_result = run_command_capture(cmd);
+            if (last_result.exit_code == 0) {
+                sevenzip::remember_backend(archive_path, password, tool);
+                return last_result;
+            }
         }
-        return run_command_capture(cmd);
+        return last_result;
     }
 
     static CommandResult extract_unzip_command(const std::string& archive_path, const std::string& entry_path, const std::string& password) {
@@ -406,7 +454,7 @@ namespace tui::archive_ops {
     TextExtractionResult extract_text(const std::string& archive_path, const std::string& entry_path, file_type::FileType type, const std::string& password) {
         switch (type) {
             case file_type::FileType::ARCHIVE_P7ZIP:
-                return make_text_extraction_result(extract_7z_command(archive_path, entry_path, password, sevenzip::require_executable(), true));
+                return make_text_extraction_result(extract_7z_command(archive_path, entry_path, password, "", true));
             case file_type::FileType::ARCHIVE_TAR:
             case file_type::FileType::ARCHIVE_TAR_GZ:
             case file_type::FileType::ARCHIVE_TAR_BZ2:
@@ -415,7 +463,7 @@ namespace tui::archive_ops {
                 return make_text_extraction_result(extract_tar_command(archive_path, entry_path, type));
 
             case file_type::FileType::ARCHIVE_7Z:
-                if (operation::is_tool_available("7z")) {
+                if (!sevenzip::executables().empty()) {
                     return make_text_extraction_result(extract_7z_command(archive_path, entry_path, password));
                 }
                 break;
@@ -424,13 +472,13 @@ namespace tui::archive_ops {
                 if (operation::is_tool_available("unrar")) {
                     return make_text_extraction_result(extract_rar_command(archive_path, entry_path, password));
                 }
-                if (operation::is_tool_available("7z")) {
+                if (!sevenzip::executables().empty()) {
                     return make_text_extraction_result(extract_7z_command(archive_path, entry_path, password));
                 }
                 break;
 
             case file_type::FileType::ARCHIVE_ZIP:
-                if (operation::is_tool_available("7z")) {
+                if (!sevenzip::executables().empty()) {
                     return make_text_extraction_result(extract_7z_command(archive_path, entry_path, password));
                 }
                 if (operation::is_tool_available("unzip")) {
@@ -466,7 +514,7 @@ namespace tui::archive_ops {
     std::string extract_to_string(const std::string& archive_path, const std::string& entry_path, file_type::FileType type, const std::string& password) {
         switch (type) {
             case file_type::FileType::ARCHIVE_P7ZIP:
-                return make_text_extraction_result(extract_7z_command(archive_path, entry_path, password, sevenzip::require_executable(), true)).content;
+                return make_text_extraction_result(extract_7z_command(archive_path, entry_path, password, "", true)).content;
             case file_type::FileType::ARCHIVE_TAR:
             case file_type::FileType::ARCHIVE_TAR_GZ:
             case file_type::FileType::ARCHIVE_TAR_BZ2:
@@ -478,7 +526,7 @@ namespace tui::archive_ops {
             }
 
             case file_type::FileType::ARCHIVE_7Z:
-                if (operation::is_tool_available("7z")) {
+                if (!sevenzip::executables().empty()) {
                     auto result = extract_7z_command(archive_path, entry_path, password);
                     return result.exit_code == 0 ? result.stdout_output : "";
                 }
@@ -489,14 +537,14 @@ namespace tui::archive_ops {
                     auto result = extract_rar_command(archive_path, entry_path, password);
                     return result.exit_code == 0 ? result.stdout_output : "";
                 }
-                if (operation::is_tool_available("7z")) {
+                if (!sevenzip::executables().empty()) {
                     auto result = extract_7z_command(archive_path, entry_path, password);
                     return result.exit_code == 0 ? result.stdout_output : "";
                 }
                 break;
 
             case file_type::FileType::ARCHIVE_ZIP:
-                if (operation::is_tool_available("7z")) {
+                if (!sevenzip::executables().empty()) {
                     auto result = extract_7z_command(archive_path, entry_path, password);
                     return result.exit_code == 0 ? result.stdout_output : "";
                 } else if (operation::is_tool_available("unzip")) {
@@ -548,12 +596,21 @@ namespace tui::archive_ops {
         return run_command_status(cmd) == 0;
     }
 
-    static bool extract_single_7z(const std::string& archive_path, const std::string& entry_path, const std::string& output_dir, const std::string& password, const std::string& tool = "7z") {
-        std::vector<std::string> cmd = {tool, "x", "-spd", "-o" + fs::absolute(output_dir).string(), "-y", "--", fs::absolute(archive_path).string(), entry_path};
-        if (!password.empty()) {
-            cmd.insert(cmd.begin() + 2, "-p" + password);
+    static bool extract_single_7z(const std::string& archive_path,
+                                  const std::string& entry_path,
+                                  const std::string& output_dir,
+                                  const std::string& password,
+                                  const std::string& preferred_tool = "") {
+        const auto tools = sevenzip_tool_candidates(archive_path, password, preferred_tool);
+        for (const auto& tool : tools) {
+            std::vector<std::string> cmd = {tool, "x", "-spd", "-o" + fs::absolute(output_dir).string(), "-y", "--", fs::absolute(archive_path).string(), entry_path};
+            if (!password.empty()) cmd.insert(cmd.begin() + 2, "-p" + password);
+            if (run_command_status(cmd) == 0) {
+                sevenzip::remember_backend(archive_path, password, tool);
+                return true;
+            }
         }
-        return run_command_status(cmd) == 0;
+        return false;
     }
 
     static bool extract_single_unzip(const std::string& archive_path, const std::string& entry_path, const std::string& output_dir, const std::string& password) {
@@ -592,17 +649,25 @@ namespace tui::archive_ops {
     bool extract_single(const std::string& archive_path, const std::string& entry_path, const std::string& output_dir, file_type::FileType type, const std::string& password) {
         switch (type) {
             case file_type::FileType::ARCHIVE_P7ZIP: {
-                const std::string tool = sevenzip::require_executable();
-                if (sevenzip::is_stream_format(sevenzip::probe_format(archive_path, password))) {
+                const std::string format = sevenzip::probe_format(archive_path, password);
+                if (sevenzip::is_stream_format(format)) {
                     if (entry_path.empty() || fs::path(entry_path).filename() != entry_path || entry_path == "." || entry_path == "..") return false;
-                    fs::create_directories(output_dir);
+                    std::error_code ec;
+                    fs::create_directories(output_dir, ec);
+                    if (ec) return false;
                     const fs::path output_path = fs::path(output_dir) / entry_path;
                     if (fs::is_symlink(fs::symlink_status(output_path))) return false;
-                    return process::run_command_to_file(
-                        {tool, "e", "-so", "-bse0", password.empty() ? "-p-" : "-p" + password,
-                         "--", fs::absolute(archive_path).string()}, output_path.string());
+                    for (const auto& tool : sevenzip_tool_candidates(archive_path, password)) {
+                        if (process::run_command_to_file(
+                                {tool, "e", "-so", "-bse0", password.empty() ? "-p-" : "-p" + password,
+                                 "--", fs::absolute(archive_path).string()}, output_path.string())) {
+                            sevenzip::remember_backend(archive_path, password, tool);
+                            return true;
+                        }
+                    }
+                    return false;
                 }
-                return extract_single_7z(archive_path, entry_path, output_dir, password, tool);
+                return extract_single_7z(archive_path, entry_path, output_dir, password);
             }
             case file_type::FileType::ARCHIVE_TAR:
             case file_type::FileType::ARCHIVE_TAR_GZ:
@@ -612,7 +677,7 @@ namespace tui::archive_ops {
                 return extract_single_tar(archive_path, entry_path, output_dir, type);
 
             case file_type::FileType::ARCHIVE_7Z:
-                if (operation::is_tool_available("7z")) {
+                if (!sevenzip::executables().empty()) {
                     return extract_single_7z(archive_path, entry_path, output_dir, password);
                 }
                 break;
@@ -621,13 +686,13 @@ namespace tui::archive_ops {
                 if (operation::is_tool_available("unrar")) {
                     return extract_single_rar(archive_path, entry_path, output_dir, password);
                 }
-                if (operation::is_tool_available("7z")) {
+                if (!sevenzip::executables().empty()) {
                     return extract_single_7z(archive_path, entry_path, output_dir, password);
                 }
                 break;
 
             case file_type::FileType::ARCHIVE_ZIP:
-                if (operation::is_tool_available("7z")) {
+                if (!sevenzip::executables().empty()) {
                     return extract_single_7z(archive_path, entry_path, output_dir, password);
                 } else if (operation::is_tool_available("unzip")) {
                     return extract_single_unzip(archive_path, entry_path, output_dir, password);
