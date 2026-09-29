@@ -155,14 +155,14 @@ namespace {
             "tui_settings_create_dir_failed",
             "tui_settings_open_failed",
             "tui_editor_write_back_failed",
+            "tui_image_label",
+            "tui_image_too_large",
             "tui_preview_shortcut_hint",
             "tui_list_shortcut_hint",
             "tui_active_suffix",
             "tui_preview_directories_suffix",
             "tui_preview_files_suffix",
             "tui_preview_first_entries",
-            "tui_image_label",
-            "tui_image_too_large",
         };
 
         for (const std::string& key : keys) {
