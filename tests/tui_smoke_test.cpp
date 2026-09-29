@@ -14,6 +14,22 @@
 namespace fs = std::filesystem;
 
 namespace {
+    // Tests have to write somewhere that exists on every platform. A hardcoded absolute path
+    // only ever works on the machine the suite was written on, and on Termux neither /tmp nor
+    // /opt exists, so the operating system's temp directory (TMPDIR, %TEMP%, /tmp) is the
+    // reliable choice. The current directory is the fallback when the environment cannot
+    // provide one.
+    fs::path test_work_dir() {
+        std::error_code ec;
+        const fs::path temp = fs::temp_directory_path(ec);
+        if (!ec) {
+            const fs::path root = temp / "hitpag-tests";
+            fs::create_directories(root, ec);
+            if (!ec) return root;
+        }
+        return fs::current_path();
+    }
+
     class ScopedTestDir {
     public:
         explicit ScopedTestDir(fs::path path) : path_(std::move(path)) {
@@ -239,7 +255,7 @@ int main() {
     ok &= test_tui_args();
     ok &= test_tui_i18n_keys();
 
-    ScopedTestDir tmp_root("/opt/hitpag/tmp/tui_smoke_test");
+    ScopedTestDir tmp_root(test_work_dir() / "tui_smoke_test");
     if (!tmp_root.valid()) {
         std::cerr << "FAIL: unable to create test directory: " << tmp_root.error() << std::endl;
         return 1;

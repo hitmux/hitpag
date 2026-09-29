@@ -92,6 +92,7 @@ add_test(
     NAME cmake_ftxui_vendored_test
     COMMAND ${CMAKE_COMMAND}
         -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+        -DTEST_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake_ftxui_vendored_test.cmake
 )
 
