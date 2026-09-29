@@ -14,6 +14,7 @@
 - 通过扩展名、文件签名识别已有格式，并使用 p7zip/7-Zip 探测更多归档和容器。
 - 一条命令覆盖压缩、解压、验证和归档浏览。
 - 内置 TUI 归档浏览器，可列表、搜索、预览、提取、编辑和播放音频归档条目。
+- 图片条目（PNG、JPEG、GIF、BMP、WebP 等）可直接在预览面板中以真彩色块渲染。
 - 支持 tar、gzip、bzip2、xz、zip、7z、rar、lz4、zstd 和 xar。
 - 在底层工具支持的范围内，支持 zip、7z 和 rar 的密码解压。
 - TUI 基于 FTXUI；仓库内包含 vendored static FTXUI。
@@ -44,6 +45,8 @@ CMake 配置时会解析 FTXUI。hitpag 优先使用兼容的系统静态 FTXUI�
 cmake .. -DHITPAG_FORCE_VENDORED_FTXUI=ON
 cmake .. -DHITPAG_FORCE_SYSTEM_FTXUI=ON
 ```
+
+图片预览不需要额外运行时依赖：仓库内置的 `third_party/stb/stb_image.h`（public domain / MIT 双许可）负责解码 PNG、JPEG、GIF、BMP、TGA、PSD、PNM 与 WebP 条目。
 
 ### 各平台依赖
 
@@ -93,6 +96,8 @@ hitpag archive.tar.gz
 - `q` 或 `Esc`：退出或关闭当前对话框。
 
 音频预览会依次尝试 `mpv`、`ffplay`、`termux-media-player`、`paplay`、`aplay` 和 `xdg-open`。
+
+图片预览使用真彩色半格字符（`▀`）绘制，并始终缩放到预览面板范围；单个图片条目的预览读取上限为 32 MiB。
 
 ---
 

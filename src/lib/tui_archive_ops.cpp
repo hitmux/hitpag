@@ -391,7 +391,7 @@ namespace tui::archive_ops {
         return entries;
     }
 
-    static CommandResult extract_tar_command(const std::string& archive_path, const std::string& entry_path, file_type::FileType type) {
+    static CommandResult extract_tar_command(const std::string& archive_path, const std::string& entry_path, file_type::FileType type, std::size_t max_output = std::numeric_limits<std::size_t>::max()) {
         std::vector<std::string> cmd = {"tar", "-xf", archive_path, "-O", entry_path};
         if (type == file_type::FileType::ARCHIVE_TAR_ZSTD) {
             cmd = {"tar", "--zstd", "-xf", archive_path, "-O", entry_path};
@@ -402,14 +402,15 @@ namespace tui::archive_ops {
         } else if (type == file_type::FileType::ARCHIVE_TAR_XZ) {
             cmd = {"tar", "-xJf", archive_path, "-O", entry_path};
         }
-        return run_command_capture(cmd);
+        return run_command_capture(cmd, max_output);
     }
 
     static CommandResult extract_7z_command(const std::string& archive_path,
                                              const std::string& entry_path,
                                              const std::string& password,
                                              const std::string& preferred_tool = "",
-                                             bool generic = false) {
+                                             bool generic = false,
+                                             std::size_t max_output = std::numeric_limits<std::size_t>::max()) {
         const std::string format = generic ? sevenzip::probe_format(archive_path, password) : std::string{};
         const auto tools = sevenzip_tool_candidates(archive_path, password, preferred_tool);
         CommandResult last_result;
@@ -417,7 +418,7 @@ namespace tui::archive_ops {
             std::vector<std::string> cmd = {tool, "e", "-so", "-bse0", "-spd", "--", fs::absolute(archive_path).string()};
             if (!generic || !sevenzip::is_stream_format(format)) cmd.push_back(entry_path);
             if (!password.empty()) cmd.insert(cmd.begin() + 2, "-p" + password);
-            last_result = run_command_capture(cmd);
+            last_result = run_command_capture(cmd, max_output);
             if (last_result.exit_code == 0) {
                 sevenzip::remember_backend(archive_path, password, tool);
                 return last_result;
@@ -426,29 +427,29 @@ namespace tui::archive_ops {
         return last_result;
     }
 
-    static CommandResult extract_unzip_command(const std::string& archive_path, const std::string& entry_path, const std::string& password) {
+    static CommandResult extract_unzip_command(const std::string& archive_path, const std::string& entry_path, const std::string& password, std::size_t max_output = std::numeric_limits<std::size_t>::max()) {
         std::vector<std::string> cmd = {"unzip", "-p", archive_path, entry_path};
         if (!password.empty()) {
             cmd.insert(cmd.begin() + 2, "-P");
             cmd.insert(cmd.begin() + 3, password);
         }
-        return run_command_capture(cmd);
+        return run_command_capture(cmd, max_output);
     }
 
-    static CommandResult extract_xar_command(const std::string& archive_path, const std::string& entry_path) {
-        return run_command_capture({"xar", "-xf", archive_path, "-O", entry_path});
+    static CommandResult extract_xar_command(const std::string& archive_path, const std::string& entry_path, std::size_t max_output = std::numeric_limits<std::size_t>::max()) {
+        return run_command_capture({"xar", "-xf", archive_path, "-O", entry_path}, max_output);
     }
 
-    static CommandResult extract_rar_command(const std::string& archive_path, const std::string& entry_path, const std::string& password) {
-        return run_command_capture({"unrar", "p", "-inul", build_unrar_password_arg(password), archive_path, entry_path});
+    static CommandResult extract_rar_command(const std::string& archive_path, const std::string& entry_path, const std::string& password, std::size_t max_output = std::numeric_limits<std::size_t>::max()) {
+        return run_command_capture({"unrar", "p", "-inul", build_unrar_password_arg(password), archive_path, entry_path}, max_output);
     }
 
-    static CommandResult extract_lz4_command(const std::string& archive_path) {
-        return run_command_capture({"lz4", "-d", "-f", archive_path, "-"});
+    static CommandResult extract_lz4_command(const std::string& archive_path, std::size_t max_output = std::numeric_limits<std::size_t>::max()) {
+        return run_command_capture({"lz4", "-d", "-f", archive_path, "-"}, max_output);
     }
 
-    static CommandResult extract_zstd_command(const std::string& archive_path) {
-        return run_command_capture({"zstd", "-d", "-f", "-c", archive_path});
+    static CommandResult extract_zstd_command(const std::string& archive_path, std::size_t max_output = std::numeric_limits<std::size_t>::max()) {
+        return run_command_capture({"zstd", "-d", "-f", "-c", archive_path}, max_output);
     }
 
     TextExtractionResult extract_text(const std::string& archive_path, const std::string& entry_path, file_type::FileType type, const std::string& password) {
@@ -511,30 +512,30 @@ namespace tui::archive_ops {
         return TextExtractionResult{};
     }
 
-    std::string extract_to_string(const std::string& archive_path, const std::string& entry_path, file_type::FileType type, const std::string& password) {
+    std::string extract_to_string(const std::string& archive_path, const std::string& entry_path, file_type::FileType type, const std::string& password, std::size_t max_output) {
         switch (type) {
             case file_type::FileType::ARCHIVE_P7ZIP:
-                return make_text_extraction_result(extract_7z_command(archive_path, entry_path, password, "", true)).content;
+                return make_text_extraction_result(extract_7z_command(archive_path, entry_path, password, "", true, max_output)).content;
             case file_type::FileType::ARCHIVE_TAR:
             case file_type::FileType::ARCHIVE_TAR_GZ:
             case file_type::FileType::ARCHIVE_TAR_BZ2:
             case file_type::FileType::ARCHIVE_TAR_XZ:
             case file_type::FileType::ARCHIVE_TAR_ZSTD:
             {
-                auto result = extract_tar_command(archive_path, entry_path, type);
+                auto result = extract_tar_command(archive_path, entry_path, type, max_output);
                 return result.exit_code == 0 ? result.stdout_output : "";
             }
 
             case file_type::FileType::ARCHIVE_7Z:
                 if (!sevenzip::executables().empty()) {
-                    auto result = extract_7z_command(archive_path, entry_path, password);
+                    auto result = extract_7z_command(archive_path, entry_path, password, "", false, max_output);
                     return result.exit_code == 0 ? result.stdout_output : "";
                 }
                 break;
 
             case file_type::FileType::ARCHIVE_RAR:
                 if (operation::is_tool_available("unrar")) {
-                    auto result = extract_rar_command(archive_path, entry_path, password);
+                    auto result = extract_rar_command(archive_path, entry_path, password, max_output);
                     return result.exit_code == 0 ? result.stdout_output : "";
                 }
                 if (!sevenzip::executables().empty()) {
@@ -548,28 +549,28 @@ namespace tui::archive_ops {
                     auto result = extract_7z_command(archive_path, entry_path, password);
                     return result.exit_code == 0 ? result.stdout_output : "";
                 } else if (operation::is_tool_available("unzip")) {
-                    auto result = extract_unzip_command(archive_path, entry_path, password);
+                    auto result = extract_unzip_command(archive_path, entry_path, password, max_output);
                     return result.exit_code == 0 ? result.stdout_output : "";
                 }
                 break;
 
             case file_type::FileType::ARCHIVE_XAR:
                 if (operation::is_tool_available("xar")) {
-                    auto result = extract_xar_command(archive_path, entry_path);
+                    auto result = extract_xar_command(archive_path, entry_path, max_output);
                     return result.exit_code == 0 ? result.stdout_output : "";
                 }
                 break;
 
             case file_type::FileType::ARCHIVE_LZ4:
                 if (operation::is_tool_available("lz4")) {
-                    auto result = extract_lz4_command(archive_path);
+                    auto result = extract_lz4_command(archive_path, max_output);
                     return result.exit_code == 0 ? result.stdout_output : "";
                 }
                 break;
 
             case file_type::FileType::ARCHIVE_ZSTD:
                 if (operation::is_tool_available("zstd")) {
-                    auto result = extract_zstd_command(archive_path);
+                    auto result = extract_zstd_command(archive_path, max_output);
                     return result.exit_code == 0 ? result.stdout_output : "";
                 }
                 break;
@@ -798,6 +799,17 @@ namespace tui::archive_ops {
             }
         }
         return false;
+    }
+
+    bool is_image_file(const std::string& path) {
+        std::string extension = fs::path(path).extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        static const std::vector<std::string> extensions = {
+            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".psd", ".pic", ".pnm", ".pgm", ".ppm", ".webp"
+        };
+        return std::find(extensions.begin(), extensions.end(), extension) != extensions.end();
     }
 
     bool is_audio_file(const std::string& path) {

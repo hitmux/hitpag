@@ -202,6 +202,8 @@ namespace i18n {
         {"tui_editor_copy_failed", "Write-back failed while copying the edited file into the rebuilt archive tree: {REASON}"},
         {"tui_editor_rebuild_failed", "Write-back failed while rebuilding the archive content: {REASON}"},
         {"tui_editor_write_back_failed", "Failed to write the edited file back to the archive"},
+        {"tui_image_label", "Image"},
+        {"tui_image_too_large", "Image is too large to preview"},
         {"tui_detail_type", "Type:"},
         {"tui_detail_file", "File"},
         {"tui_detail_directory", "Directory"},

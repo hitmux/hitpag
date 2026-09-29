@@ -12,6 +12,7 @@
 #include <functional>
 #include "include/file_type.h"
 #include "include/tui_archive_ops.h"
+#include "include/tui_image.h"
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/box.hpp>
@@ -23,7 +24,7 @@ namespace tui {
         void load_directory(const std::string& dir_path, const std::vector<archive_ops::ArchiveEntry>& entries);
         void clear();
         ftxui::Element render() const;
-        bool has_content() const { return !lines_.empty() || !status_message_.empty(); }
+        bool has_content() const { return !lines_.empty() || !status_message_.empty() || is_image_view_; }
         const std::string& loaded_entry_path() const { return loaded_entry_path_; }
 
         void scroll_up();
@@ -37,6 +38,7 @@ namespace tui {
 
         std::function<void(const std::string& entry_path, bool is_directory)> on_entry_activated;
         bool is_directory_view() const { return is_directory_view_; }
+        bool is_image_view() const { return is_image_view_; }
         int selected_dir_entry() const { return selected_dir_entry_; }
         size_t dir_entry_count() const { return dir_entries_.size(); }
         void dir_entry_up();
@@ -57,6 +59,13 @@ namespace tui {
         std::string scroll_progress_text(int start, int last) const;
         std::string format_size(uint64_t size) const;
 
+        void reset_image_state();
+        bool load_image(const std::string& archive_path, const std::string& entry_path, file_type::FileType type, const std::string& password);
+        int box_height() const;
+        int image_area_width() const;
+        int image_area_rows() const;
+        ftxui::Element build_image_element() const;
+
         std::vector<std::string> lines_;
         mutable std::vector<std::string> wrapped_lines_;
         std::string status_message_;
@@ -66,6 +75,13 @@ namespace tui {
         mutable ftxui::Box box_;
         bool is_directory_view_ = false;
         int selected_dir_entry_ = -1;
+
+        bool is_image_view_ = false;
+        image::Image image_;
+        std::string image_caption_;
+        mutable ftxui::Element image_element_;
+        mutable int image_element_columns_ = 0;
+        mutable int image_element_rows_ = 0;
 
         struct DirEntryInfo {
             std::string full_path;
