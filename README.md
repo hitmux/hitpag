@@ -14,6 +14,7 @@
 - Detects archive formats by file signature instead of filename extension.
 - Uses one command for compression, extraction, verification, and archive browsing.
 - Includes a TUI archive browser for listing, searching, previewing, extracting, editing, and playing audio entries.
+- Renders image entries (PNG, JPEG, GIF, BMP, WebP, ...) directly in the preview panel as truecolor blocks.
 - Supports tar, gzip, bzip2, xz, zip, 7z, rar, lz4, zstd, and xar.
 - Supports password-protected zip, 7z, and rar extraction where the underlying tool supports it.
 - Uses FTXUI for the terminal interface; a vendored static FTXUI copy is included.
@@ -44,6 +45,8 @@ FTXUI is resolved during CMake configuration. hitpag prefers a compatible system
 cmake .. -DHITPAG_FORCE_VENDORED_FTXUI=ON
 cmake .. -DHITPAG_FORCE_SYSTEM_FTXUI=ON
 ```
+
+Image previews need no runtime dependency: the vendored single-header `third_party/stb/stb_image.h` (public domain) decodes PNG, JPEG, GIF, BMP, TGA, PSD, PNM, and WebP entries.
 
 ### Dependencies by platform
 
@@ -93,6 +96,8 @@ Core TUI actions:
 - `q` or `Esc`: quit or close the current dialog.
 
 Audio preview uses the first available player from `mpv`, `ffplay`, `termux-media-player`, `paplay`, `aplay`, and `xdg-open`.
+
+Image previews are drawn with truecolor half blocks (`▀`) and are always rescaled to the preview panel, so they follow the current terminal size and never overflow or wrap.
 
 ---
 

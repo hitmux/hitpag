@@ -911,6 +911,17 @@ namespace tui::archive_ops {
         return std::find(extensions.begin(), extensions.end(), extension) != extensions.end();
     }
 
+    bool is_image_file(const std::string& path) {
+        std::string extension = fs::path(path).extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        static const std::vector<std::string> extensions = {
+            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".psd", ".pic", ".pnm", ".pgm", ".ppm", ".webp"
+        };
+        return std::find(extensions.begin(), extensions.end(), extension) != extensions.end();
+    }
+
     AudioPlaybackResult play_audio_file(const std::string& path) {
         AudioPlaybackResult result;
         std::vector<std::string> command;

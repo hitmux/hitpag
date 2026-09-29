@@ -59,6 +59,7 @@ add_executable(hitpag
     src/lib/tui_details.cpp
     src/lib/tui_preview.cpp
     src/lib/tui_preview_model.cpp
+    src/lib/tui_image.cpp
     src/lib/tui_settings.cpp
     src/lib/tui_editor.cpp
 )
@@ -74,10 +75,11 @@ add_executable(tui_smoke_test
     src/lib/operation.cpp
     src/lib/progress.cpp
     src/lib/tui_archive_ops.cpp
+    src/lib/tui_image.cpp
 )
 
-target_include_directories(hitpag PRIVATE src)
-target_include_directories(tui_smoke_test PRIVATE src)
+target_include_directories(hitpag PRIVATE src third_party/stb)
+target_include_directories(tui_smoke_test PRIVATE src third_party/stb)
 
 target_link_libraries(hitpag PRIVATE Threads::Threads
     ftxui::screen
@@ -95,6 +97,25 @@ add_test(
         -DTEST_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake_ftxui_vendored_test.cmake
 )
+
+add_executable(tui_preview_layout_test
+    tests/tui_preview_layout_test.cpp
+    src/lib/args.cpp
+    src/lib/error.cpp
+    src/lib/i18n.cpp
+    src/lib/file_type.cpp
+    src/lib/operation.cpp
+    src/lib/progress.cpp
+    src/lib/tui_archive_ops.cpp
+    src/lib/tui_image.cpp
+    src/lib/tui_preview.cpp
+)
+target_include_directories(tui_preview_layout_test PRIVATE src third_party/stb)
+target_link_libraries(tui_preview_layout_test PRIVATE Threads::Threads ftxui::dom)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
+    target_link_libraries(tui_preview_layout_test PRIVATE stdc++fs)
+endif()
+add_test(NAME tui_preview_layout_test COMMAND tui_preview_layout_test)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
     target_link_libraries(hitpag PRIVATE stdc++fs)

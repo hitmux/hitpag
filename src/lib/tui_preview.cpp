@@ -9,6 +9,7 @@
 #include "include/i18n.h"
 
 #include <ftxui/dom/elements.hpp>
+#include <ftxui/screen/terminal.hpp>
 
 #include <algorithm>
 #include <sstream>
@@ -41,6 +42,11 @@ namespace tui {
         wrapped_width_ = 0;
         scroll_offset_ = 0;
         is_directory_view_ = false;
+        reset_image_state();
+
+        if (archive_ops::is_image_file(entry_path) && load_image(archive_path, entry_path, type, password)) {
+            return;
+        }
 
         archive_ops::TextExtractionResult extraction = archive_ops::extract_text(archive_path, entry_path, type, password);
 
@@ -95,6 +101,7 @@ namespace tui {
         scroll_offset_ = 0;
         is_directory_view_ = true;
         dir_entries_.clear();
+        reset_image_state();
         dir_base_path_ = dir_path;
         selected_dir_entry_ = -1;
 
@@ -179,8 +186,98 @@ namespace tui {
         wrapped_width_ = 0;
         scroll_offset_ = 0;
         is_directory_view_ = false;
+        reset_image_state();
         dir_entries_.clear();
         dir_base_path_.clear();
+    }
+
+    void PreviewPanel::reset_image_state() {
+        is_image_view_ = false;
+        image_ = image::Image{};
+        image_caption_.clear();
+        image_element_ = nullptr;
+        image_element_columns_ = 0;
+        image_element_rows_ = 0;
+    }
+
+    bool PreviewPanel::load_image(const std::string& archive_path, const std::string& entry_path, file_type::FileType type, const std::string& password) {
+        constexpr std::size_t MAX_IMAGE_BYTES = 32 * 1024 * 1024;
+
+        std::string bytes = archive_ops::extract_to_string(archive_path, entry_path, type, password);
+        if (bytes.empty()) {
+            return false;
+        }
+
+        if (bytes.size() > MAX_IMAGE_BYTES) {
+            status_message_ = i18n::get("tui_image_too_large");
+            return true;
+        }
+
+        image::Image decoded = image::decode(bytes);
+        if (!decoded.valid()) {
+            return false;
+        }
+
+        image_ = std::move(decoded);
+        is_image_view_ = true;
+
+        std::ostringstream caption;
+        caption << i18n::get("tui_image_label") << ": " << image_.width << "x" << image_.height;
+        image_caption_ = caption.str();
+        return true;
+    }
+
+    int PreviewPanel::box_height() const {
+        int height = box_.y_max - box_.y_min + 1;
+        if (height <= 1) {
+            height = Terminal::Size().dimy;
+        }
+        return height;
+    }
+
+    int PreviewPanel::image_area_width() const {
+        const int terminal_width = std::max(1, Terminal::Size().dimx - 2);
+        return std::clamp(content_width(), 1, terminal_width);
+    }
+
+    int PreviewPanel::image_area_rows() const {
+        // The reflected box covers the panel border (2 rows) and the image keeps a
+        // separator plus a caption line underneath.
+        int rows = box_height() - 4;
+        // Clamp against the live terminal size so the blocks can never spill past
+        // the visible screen while a resize is still settling.
+        rows = std::min(rows, std::max(2, Terminal::Size().dimy - 4));
+        return std::max(2, rows);
+    }
+
+    Element PreviewPanel::build_image_element() const {
+        const int columns = image_area_width();
+        const int rows = image_area_rows();
+
+        if (image_element_ && columns == image_element_columns_ && rows == image_element_rows_) {
+            return image_element_;
+        }
+
+        const image::Image scaled = image::fit_to_cells(image_, columns, rows);
+
+        Elements rendered_rows;
+        for (int y = 0; y + 1 < scaled.height; y += 2) {
+            Elements cells;
+            cells.reserve(static_cast<std::size_t>(scaled.width));
+            for (int x = 0; x < scaled.width; ++x) {
+                const image::Rgb& upper = scaled.at(x, y);
+                const image::Rgb& lower = scaled.at(x, y + 1);
+                cells.push_back(text("\u2580") |
+                                color(Color::RGB(upper.r, upper.g, upper.b)) |
+                                bgcolor(Color::RGB(lower.r, lower.g, lower.b)));
+            }
+            rendered_rows.push_back(hbox(std::move(cells)));
+        }
+
+        image_element_ = vbox(std::move(rendered_rows));
+        image_element_columns_ = columns;
+        image_element_rows_ = rows;
+        return image_element_;
     }
 
     int PreviewPanel::content_width() const {
@@ -209,6 +306,9 @@ namespace tui {
     }
 
     int PreviewPanel::max_scroll_offset() const {
+        if (is_image_view_) {
+            return 0;
+        }
         if (is_directory_view_) {
             return std::max(0, static_cast<int>(lines_.size()) - visible_line_capacity());
         }
@@ -399,7 +499,11 @@ namespace tui {
     Element PreviewPanel::render() const {
         Elements items;
 
-        if (!status_message_.empty() && lines_.empty()) {
+        if (is_image_view_ && image_.valid()) {
+            items.push_back(build_image_element() | hcenter);
+            items.push_back(separator());
+            items.push_back(text(image_caption_) | dim);
+        } else if (!status_message_.empty() && lines_.empty()) {
             items.push_back(paragraph(status_message_) | dim);
         } else if (is_directory_view_) {
             int capacity = visible_line_capacity();

@@ -131,6 +131,8 @@ namespace i18n {
         {"tui_preview_directories_suffix", "directories"},
         {"tui_preview_files_suffix", "files"},
         {"tui_preview_first_entries", "First entries:"},
+        {"tui_image_label", "Image"},
+        {"tui_image_too_large", "[Image too large to preview]"},
         {"tui_edit_select_file_first", "Select a file before editing"},
         {"tui_extract_alert_title", "Extract"},
         {"tui_edit_alert_title", "Edit"},

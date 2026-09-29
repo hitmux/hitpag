@@ -48,6 +48,7 @@ namespace tui::archive_ops {
     bool extract_single(const std::string& archive_path, const std::string& entry_path, const std::string& output_dir, file_type::FileType type, const std::string& password = "");
     bool extract_preview_file(const std::string& archive_path, const std::string& entry_path, const std::string& output_dir, file_type::FileType type, const std::string& password, std::string& extracted_path);
     bool is_audio_file(const std::string& path);
+    bool is_image_file(const std::string& path);
     AudioPlaybackResult play_audio_file(const std::string& path);
     bool is_text_content(const std::string& content);
 }
