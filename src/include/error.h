@@ -35,4 +35,8 @@ namespace error {
     };
 
     void throw_error(ErrorCode code, const std::map<std::string, std::string>& placeholders = {});
+
+    // Add the password hint only when a password actually participated in the operation.
+    void throw_operation_failed(const std::map<std::string, std::string>& placeholders,
+                                bool password_was_used);
 }

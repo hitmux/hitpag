@@ -22,6 +22,14 @@ namespace error {
             case ErrorCode::NOT_ENOUGH_SPACE: message_key = "error_not_enough_space"; break;
             default: message_key = "Unknown error"; code = ErrorCode::UNKNOWN_ERROR;
         }
-        throw HitpagException(code, i18n::get(message_key, placeholders));
+        std::map<std::string, std::string> values = placeholders;
+        values.emplace("PASSWORD_HINT", "");
+        throw HitpagException(code, i18n::get(message_key, values));
+    }
+
+    void throw_operation_failed(const std::map<std::string, std::string>& placeholders, bool password_was_used) {
+        std::map<std::string, std::string> values = placeholders;
+        values["PASSWORD_HINT"] = password_was_used ? i18n::get("error_password_hint") : "";
+        throw HitpagException(ErrorCode::OPERATION_FAILED, i18n::get("error_operation_failed", values));
     }
 }

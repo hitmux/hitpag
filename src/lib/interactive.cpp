@@ -9,6 +9,7 @@
 #include "include/error.h"
 #include "include/file_type.h"
 #include "include/operation.h"
+#include "include/sevenzip.h"
 #include "include/util.h"
 #include "include/target_path.h"
 
@@ -124,8 +125,10 @@ namespace interactive {
 
     struct MenuItem {
         std::string key;
+        std::string label;
         file_type::FileType type;
         bool supports_password;
+        std::string force_format;
     };
 
     void run(args::Options& options, progress::ProgressTracker& tracker) {
@@ -140,8 +143,7 @@ namespace interactive {
 
         std::cout << "Source: " << options.source_path << " (" << file_type::get_file_type_string(source_type) << ")" << std::endl;
 
-        file_type::OperationType op_type = (source_type == file_type::FileType::DIRECTORY || source_type == file_type::FileType::REGULAR_FILE)
-            ? file_type::OperationType::COMPRESS : file_type::OperationType::DECOMPRESS;
+        file_type::OperationType op_type = file_type::recognize(options.source_path, options.target_path).operation;
 
         std::cout << "Detected operation: " << (op_type == file_type::OperationType::COMPRESS ? "Compress" : "Decompress") << ". Change? (y/n): ";
         std::string change_op_input = get_input();
@@ -153,22 +155,30 @@ namespace interactive {
         file_type::FileType target_format = file_type::FileType::UNKNOWN;
 
         if (op_type == file_type::OperationType::COMPRESS) {
-            const std::vector<MenuItem> formats = {
-                {"format_tar_gz", file_type::FileType::ARCHIVE_TAR_GZ, false},
-                {"format_zip", file_type::FileType::ARCHIVE_ZIP, true},
-                {"format_7z", file_type::FileType::ARCHIVE_7Z, true},
-                {"format_tar", file_type::FileType::ARCHIVE_TAR, false},
-                {"format_tar_bz2", file_type::FileType::ARCHIVE_TAR_BZ2, false},
-                {"format_tar_xz", file_type::FileType::ARCHIVE_TAR_XZ, false},
-                {"format_lz4", file_type::FileType::ARCHIVE_LZ4, false},
-                {"format_zstd", file_type::FileType::ARCHIVE_ZSTD, false},
-                {"format_xar", file_type::FileType::ARCHIVE_XAR, false}
+            std::vector<MenuItem> formats = {
+                {"format_tar_gz", "", file_type::FileType::ARCHIVE_TAR_GZ, false, ""},
+                {"format_zip", "", file_type::FileType::ARCHIVE_ZIP, true, ""},
+                {"format_7z", "", file_type::FileType::ARCHIVE_7Z, true, ""},
+                {"format_tar", "", file_type::FileType::ARCHIVE_TAR, false, ""},
+                {"format_tar_bz2", "", file_type::FileType::ARCHIVE_TAR_BZ2, false, ""},
+                {"format_tar_xz", "", file_type::FileType::ARCHIVE_TAR_XZ, false, ""},
+                {"format_lz4", "", file_type::FileType::ARCHIVE_LZ4, false, ""},
+                {"format_zstd", "", file_type::FileType::ARCHIVE_ZSTD, false, ""},
+                {"format_xar", "", file_type::FileType::ARCHIVE_XAR, false, ""}
             };
+            for (const auto& added : sevenzip::creation_formats()) {
+                formats.push_back({"", added.label, file_type::FileType::ARCHIVE_P7ZIP,
+                                   added.supports_password, added.format});
+            }
             std::cout << i18n::get("ask_format") << std::endl;
-            for (size_t i = 0; i < formats.size(); ++i) std::cout << i+1 << ". " << i18n::get(formats[i].key) << std::endl;
+            for (size_t i = 0; i < formats.size(); ++i) {
+                const std::string label = formats[i].label.empty() ? i18n::get(formats[i].key) : formats[i].label;
+                std::cout << i+1 << ". " << label << std::endl;
+            }
             int choice = get_choice(1, formats.size());
             const auto& selected_format = formats[choice - 1];
             target_format = selected_format.type;
+            options.force_format = selected_format.force_format;
 
             std::cout << "Please enter target archive path: ";
             options.target_path = get_input();

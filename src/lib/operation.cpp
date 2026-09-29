@@ -7,6 +7,7 @@
 #include "include/operation.h"
 #include "include/error.h"
 #include "include/i18n.h"
+#include "include/sevenzip.h"
 
 #include <filesystem>
 #include <iostream>
@@ -174,11 +175,15 @@ namespace operation {
         return exit_code;
     }
 
-    bool verify_archive(const std::string& archive_path, file_type::FileType format) {
+    bool verify_archive(const std::string& archive_path, file_type::FileType format, const std::string& password) {
         std::string tool;
         std::vector<std::string> args;
 
         switch (format) {
+            case file_type::FileType::ARCHIVE_P7ZIP:
+                tool = sevenzip::require_executable();
+                args = {"t", password.empty() ? "-p-" : "-p" + password, "--", fs::absolute(archive_path).string()};
+                break;
             case file_type::FileType::ARCHIVE_TAR:
             case file_type::FileType::ARCHIVE_TAR_GZ:
             case file_type::FileType::ARCHIVE_TAR_BZ2:
@@ -192,8 +197,8 @@ namespace operation {
                 args = {"-t", archive_path};
                 break;
             case file_type::FileType::ARCHIVE_7Z:
-                tool = "7z";
-                args = {"t", archive_path};
+                tool = sevenzip::require_executable();
+                args = {"t", "--", fs::absolute(archive_path).string()};
                 break;
             case file_type::FileType::ARCHIVE_RAR:
                 tool = "unrar";
@@ -215,6 +220,18 @@ namespace operation {
                 return true;
         }
 
+        if (format == file_type::FileType::ARCHIVE_P7ZIP || format == file_type::FileType::ARCHIVE_7Z) {
+            int result = -1;
+            for (const auto& candidate : sevenzip::backend_candidates(archive_path, password)) {
+                tool = candidate;
+                result = execute_command(tool, args);
+                if (result == 0) {
+                    sevenzip::remember_backend(archive_path, password, tool);
+                    return true;
+                }
+            }
+            return false;
+        }
         if (!is_tool_available(tool)) return false;
         int result = execute_command(tool, args);
         return result == 0;
@@ -274,6 +291,7 @@ namespace operation {
             error::throw_error(error::ErrorCode::MISSING_ARGS, {{"ADDITIONAL_INFO", "No sources provided for compression"}});
         }
 
+        const bool target_existed_before = fs::exists(target_path_str);
         std::vector<fs::path> canonical_sources;
         canonical_sources.reserve(sources.size());
         std::vector<bool> is_directory_flags;
@@ -330,6 +348,34 @@ namespace operation {
         }
 
         switch (target_format) {
+            case file_type::FileType::ARCHIVE_P7ZIP: {
+                std::string format = options.force_format.empty()
+                    ? sevenzip::creation_format(fs::path(target_path_str).extension().string())
+                    : sevenzip::creation_format(options.force_format);
+                if (!sevenzip::can_create(format)) {
+                    error::throw_error(error::ErrorCode::UNKNOWN_FORMAT,
+                        {{"INFO", "This added format is read-only or ambiguous. Choose a writable format (gzip, bzip2, xz, wim, zip, tar, lizard, lz5 or swfc)."}});
+                }
+                if (sevenzip::single_file_format(format) &&
+                    (canonical_sources.size() != 1 || is_directory_flags.front())) {
+                    error::throw_error(error::ErrorCode::INVALID_SOURCE,
+                        {{"PATH", sources.front().path}, {"REASON", "This format requires exactly one regular file; create a TAR first for directories or multiple files."}});
+                }
+                if (!password.empty() && !sevenzip::supports_password(format)) {
+                    error::throw_error(error::ErrorCode::UNKNOWN_FORMAT,
+                        {{"INFO", "The selected format does not support password-protected creation."}});
+                }
+                const auto candidates = sevenzip::backend_candidates(target_path_str);
+                if (candidates.empty()) sevenzip::require_executable();
+                tool = candidates.front();
+                args = {"a", "-t" + format, "-spd"};
+                if (!password.empty()) args.push_back("-p" + password);
+                if (options.compression_level > 0) args.push_back("-mx=" + std::to_string(options.compression_level));
+                args.push_back("--");
+                args.push_back(fs::absolute(target_path_str).string());
+                for (const auto& item : items_to_archive) args.push_back("./" + item);
+                break;
+            }
             case file_type::FileType::ARCHIVE_TAR:
             case file_type::FileType::ARCHIVE_TAR_GZ:
             case file_type::FileType::ARCHIVE_TAR_BZ2:
@@ -364,8 +410,7 @@ namespace operation {
                 args.insert(args.end(), items_to_archive.begin(), items_to_archive.end());
                 break;
             case file_type::FileType::ARCHIVE_7Z:
-                tool = "7z";
-                if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
+                tool = sevenzip::require_executable();
                 args.push_back("a");
                 if (!password.empty()) args.push_back("-p" + password);
                 if (options.compression_level > 0) {
@@ -417,9 +462,25 @@ namespace operation {
         }
 
         std::cout << i18n::get("compressing") << std::endl;
-        int result = execute_command(tool, args, working_dir_for_cmd);
+        int result = -1;
+        if (target_format == file_type::FileType::ARCHIVE_P7ZIP || target_format == file_type::FileType::ARCHIVE_7Z) {
+            for (const auto& candidate : sevenzip::backend_candidates(target_path_str)) {
+                tool = candidate;
+                result = execute_command(tool, args, working_dir_for_cmd);
+                if (result == 0) {
+                    sevenzip::remember_backend(target_path_str, password, tool);
+                    break;
+                }
+                if (!target_existed_before) {
+                    std::error_code cleanup_ec;
+                    fs::remove(target_path_str, cleanup_ec);
+                }
+            }
+        } else {
+            result = execute_command(tool, args, working_dir_for_cmd);
+        }
         if (result != 0) {
-            error::throw_error(error::ErrorCode::OPERATION_FAILED, {{"COMMAND", tool}, {"EXIT_CODE", std::to_string(result)}});
+            error::throw_operation_failed({{"COMMAND", tool}, {"EXIT_CODE", std::to_string(result)}}, !password.empty());
         }
 
         if (options.benchmark) {
@@ -433,7 +494,7 @@ namespace operation {
 
         if (options.verify) {
             std::cout << i18n::get("verifying") << std::endl;
-            if (verify_archive(target_path_str, target_format)) {
+            if (verify_archive(target_path_str, target_format, password)) {
                 std::cout << i18n::get("verification_success") << std::endl;
             } else {
                 std::cout << i18n::get("verification_failed") << std::endl;
@@ -465,8 +526,16 @@ namespace operation {
 
         std::string tool;
         std::vector<std::string> args;
+        bool use_sevenzip_backend = false;
 
         switch (source_type) {
+            case file_type::FileType::ARCHIVE_P7ZIP:
+                tool = sevenzip::require_executable();
+                use_sevenzip_backend = true;
+                args = {"x", "-y", "-o" + fs::absolute(target_dir_path).string()};
+                if (!password.empty()) args.push_back("-p" + password);
+                args.insert(args.end(), {"--", fs::absolute(source_path).string()});
+                break;
             case file_type::FileType::ARCHIVE_TAR:
             case file_type::FileType::ARCHIVE_TAR_GZ:
             case file_type::FileType::ARCHIVE_TAR_BZ2:
@@ -490,11 +559,8 @@ namespace operation {
                 break;
             case file_type::FileType::ARCHIVE_ZIP:
                 if (is_split_zip(source_path)) {
-                    tool = "7z";
-                    if (!is_tool_available(tool)) {
-                        throw error::HitpagException(error::ErrorCode::TOOL_NOT_FOUND,
-                            i18n::get("error_split_zip_requires_7z"));
-                    }
+                    tool = sevenzip::require_executable();
+                    use_sevenzip_backend = true;
                     std::string actual_source = source_path;
                     if (is_split_zip_part(source_path)) {
                         actual_source = find_split_zip_main(source_path);
@@ -524,8 +590,8 @@ namespace operation {
                 args.insert(args.end(), {"-o+", fs::absolute(source_path).string(), fs::absolute(target_dir_path).string()});
                 break;
             case file_type::FileType::ARCHIVE_7Z:
-                tool = "7z";
-                if (!is_tool_available(tool)) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", tool}});
+                tool = sevenzip::require_executable();
+                use_sevenzip_backend = true;
                 build_7z_extract_args(args, source_path, target_dir_path, password);
                 break;
             case file_type::FileType::ARCHIVE_LZ4:
@@ -570,9 +636,21 @@ namespace operation {
         }
 
         std::cout << i18n::get("decompressing") << std::endl;
-        int result = execute_command(tool, args, fs::current_path().string());
+        int result = -1;
+        if (use_sevenzip_backend) {
+            for (const auto& candidate : sevenzip::backend_candidates(source_path, password)) {
+                tool = candidate;
+                result = execute_command(tool, args, fs::current_path().string());
+                if (result == 0) {
+                    sevenzip::remember_backend(source_path, password, tool);
+                    break;
+                }
+            }
+        } else {
+            result = execute_command(tool, args, fs::current_path().string());
+        }
         if (result != 0) {
-            error::throw_error(error::ErrorCode::OPERATION_FAILED, {{"COMMAND", tool}, {"EXIT_CODE", std::to_string(result)}});
+            error::throw_operation_failed({{"COMMAND", tool}, {"EXIT_CODE", std::to_string(result)}}, !password.empty());
         }
         std::cout << i18n::get("operation_complete") << std::endl;
     }

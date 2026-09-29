@@ -2,7 +2,14 @@ if(NOT DEFINED SOURCE_DIR)
     message(FATAL_ERROR "SOURCE_DIR is required")
 endif()
 
-set(test_build_dir "/opt/hitpag/tmp/cmake_ftxui_vendored_test")
+# The scratch build tree has to live somewhere writable. Callers pass TEST_WORK_DIR (ctest
+# supplies the project's binary directory) and the current directory is the fallback, because a
+# hardcoded absolute path only ever works on the machine the suite was written on.
+if(NOT DEFINED TEST_WORK_DIR)
+    set(TEST_WORK_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
+
+set(test_build_dir "${TEST_WORK_DIR}/cmake_ftxui_vendored_test")
 file(REMOVE_RECURSE "${test_build_dir}")
 
 execute_process(
