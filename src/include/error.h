@@ -35,4 +35,9 @@ namespace error {
     };
 
     void throw_error(ErrorCode code, const std::map<std::string, std::string>& placeholders = {});
+
+    // Same as throw_error(OPERATION_FAILED, ...), but only appends the "wrong password?" hint
+    // when a password was actually involved. Otherwise an unsupported format or a failed process
+    // spawn gets blamed on the password, which sends users down the wrong path.
+    void throw_operation_failed(const std::map<std::string, std::string>& placeholders, bool password_was_used);
 }

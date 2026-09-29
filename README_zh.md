@@ -49,6 +49,8 @@ cmake .. -DHITPAG_FORCE_SYSTEM_FTXUI=ON
 
 归档工具按实际使用的格式安装。音频预览会选择第一个可用的播放器：`mpv`、`ffplay`、`termux-media-player`、`paplay`、`aplay` 或 `xdg-open`。
 
+通过 7-Zip 能**创建**哪些格式取决于所安装的 7-Zip 版本：p7zip 可以写 `SWFc`、`lizard`、`lz5`、`lz4`、`zstd`，而较新的 7-Zip 一个都不支持。hitpag 会按格式探测一次后端能力，遇到写不了的格式直接拒绝，而不是开始操作后在半途失败。
+
 **Arch Linux**
 
 ```bash

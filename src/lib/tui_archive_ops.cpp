@@ -104,8 +104,8 @@ namespace tui::archive_ops {
 
         auto result = run_command_capture(cmd);
         if (result.exit_code != 0) {
-            if (report_errors) error::throw_error(error::ErrorCode::OPERATION_FAILED,
-                {{"COMMAND", tool + " l"}, {"EXIT_CODE", std::to_string(result.exit_code)}});
+            if (report_errors) error::throw_operation_failed(
+                {{"COMMAND", tool + " l"}, {"EXIT_CODE", std::to_string(result.exit_code)}}, !password.empty());
             return entries;
         }
 

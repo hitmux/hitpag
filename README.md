@@ -49,6 +49,8 @@ cmake .. -DHITPAG_FORCE_SYSTEM_FTXUI=ON
 
 The archive tools are needed at runtime for the formats you use. Audio preview selects the first available player (`mpv`, `ffplay`, `termux-media-player`, `paplay`, `aplay`, or `xdg-open`).
 
+Which formats can be created through 7-Zip depends on the installed 7-Zip build: p7zip can write `SWFc`, `lizard`, `lz5`, `lz4` and `zstd`, while recent 7-Zip releases can write none of them. hitpag probes the backend once per format and refuses a format it cannot write up front, instead of starting the operation and failing partway through.
+
 **Arch Linux**
 
 ```bash

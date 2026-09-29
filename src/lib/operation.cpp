@@ -341,7 +341,7 @@ namespace operation {
                     : sevenzip::creation_format(options.force_format);
                 if (!sevenzip::can_create(format)) {
                     error::throw_error(error::ErrorCode::UNKNOWN_FORMAT,
-                        {{"INFO", "This added format is read-only or ambiguous. Choose a writable format (gzip, bzip2, xz, wim, zip, tar, lizard, lz5 or swfc)."}});
+                        {{"INFO", "This format is read-only, needs an extra workflow, or is not supported for creation by the installed 7-Zip backend. Choose a writable format such as zip, gzip, bzip2, xz, wim or tar."}});
                 }
                 if (sevenzip::single_file_format(format) &&
                     (canonical_sources.size() != 1 || is_directory_flags.front())) {
@@ -450,7 +450,7 @@ namespace operation {
         std::cout << i18n::get("compressing") << std::endl;
         int result = execute_command(tool, args, working_dir_for_cmd);
         if (result != 0) {
-            error::throw_error(error::ErrorCode::OPERATION_FAILED, {{"COMMAND", tool}, {"EXIT_CODE", std::to_string(result)}});
+            error::throw_operation_failed({{"COMMAND", tool}, {"EXIT_CODE", std::to_string(result)}}, !password.empty());
         }
 
         if (options.benchmark) {
@@ -609,7 +609,7 @@ namespace operation {
         std::cout << i18n::get("decompressing") << std::endl;
         int result = execute_command(tool, args, fs::current_path().string());
         if (result != 0) {
-            error::throw_error(error::ErrorCode::OPERATION_FAILED, {{"COMMAND", tool}, {"EXIT_CODE", std::to_string(result)}});
+            error::throw_operation_failed({{"COMMAND", tool}, {"EXIT_CODE", std::to_string(result)}}, !password.empty());
         }
         std::cout << i18n::get("operation_complete") << std::endl;
     }

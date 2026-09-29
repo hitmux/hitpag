@@ -157,6 +157,8 @@ namespace {
             "tui_preview_directories_suffix",
             "tui_preview_files_suffix",
             "tui_preview_first_entries",
+            "error_operation_failed",
+            "error_password_hint",
         };
 
         for (const std::string& key : keys) {

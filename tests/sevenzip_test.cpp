@@ -145,8 +145,15 @@ int main(int argc, char** argv) {
         swf_data.append("\x08\x00\x00\x0c\x01\x00\x00\x00", 8);
         write(swf, swf_data);
         fs::path compressed_swf = temp.path / "compressed.swf";
-        run({cli, swf.string(), compressed_swf.string()});
-        check_archive(compressed_swf, swf_data, cli);
+        if (sevenzip::can_create("SWFc")) {
+            run({cli, swf.string(), compressed_swf.string()});
+            check_archive(compressed_swf, swf_data, cli);
+            std::cout << "PASS: swf\n";
+        } else {
+            // SWF creation comes from the SWFc codec, which p7zip shipped but current
+            // 7-Zip builds no longer provide.
+            std::cout << "SKIP unsupported creation: swf\n";
+        }
         fs::path encrypted = temp.path / "encrypted.jar";
         run({cli, "--verify", "-psecret", source.string(), encrypted.string()});
         auto members = ops::list_archive(encrypted.string(), FileType::ARCHIVE_P7ZIP, "secret");

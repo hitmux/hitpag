@@ -11,10 +11,14 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <sstream>
 #include <set>
+
+namespace fs = std::filesystem;
 
 namespace sevenzip {
     namespace {
@@ -49,6 +53,21 @@ namespace sevenzip {
             std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return std::tolower(c); });
             return value;
         }
+
+        // Format names this project knows how to drive for creation. Whether the installed
+        // backend can actually write one of them is a separate question and is probed below:
+        // p7zip can create SWFc, lizard, lz5, lz4 and zstd, while current 7-Zip builds can
+        // create none of them.
+        const std::set<std::string>& creatable_candidates() {
+            static const std::set<std::string> value = {
+                "gzip", "bzip2", "xz", "wim", "SWFc", "lizard", "lz5",
+                "zip", "tar", "lz4", "zstd"
+            };
+            return value;
+        }
+
+        // Defined after executable(); declared here because can_create() is defined above it.
+        bool backend_supports_creation(const std::string& format);
     }
 
     std::string format_for_extension(const std::string& extension) {
@@ -79,11 +98,8 @@ namespace sevenzip {
     }
 
     bool can_create(const std::string& format) {
-        static const std::set<std::string> writable = {
-            "gzip", "bzip2", "xz", "wim", "SWFc", "lizard", "lz5",
-            "zip", "tar", "lz4", "zstd"
-        };
-        return writable.count(format) != 0;
+        if (creatable_candidates().count(format) == 0) return false;
+        return backend_supports_creation(format);
     }
 
     bool single_file_format(const std::string& format) {
@@ -103,6 +119,98 @@ namespace sevenzip {
         std::string tool = executable();
         if (tool.empty()) error::throw_error(error::ErrorCode::TOOL_NOT_FOUND, {{"TOOL_NAME", "7z (or 7zz / 7za)"}});
         return tool;
+    }
+
+    namespace {
+        enum class ProbeOutcome {
+            Supported,
+            Unsupported,
+            Inconclusive,
+        };
+
+        // Failure text that reliably means "this build cannot write that format at all": 7-Zip
+        // reports E_NOTIMPL for codecs it no longer ships (SWFc, zstd) and rejects a format name
+        // it does not know with an unsupported-archive-type error. Every other failure - a codec
+        // that dislikes the probe payload, for instance - must not be read as "unsupported", or
+        // a format the installed backend can really write would be blocked by mistake.
+        bool is_missing_format_error(const std::string& output) {
+            static const char* const markers[] = {
+                "E_NOTIMPL",
+                "Not implemented",
+                "Unsupported archive type",
+                "Unsupported method",
+            };
+            for (const char* marker : markers) {
+                if (output.find(marker) != std::string::npos) return true;
+            }
+            return false;
+        }
+
+        // Learns whether the installed backend can really write a format by writing a throwaway
+        // archive with it. Parsing `7z i` is not an option: p7zip and 7-Zip lay the format table
+        // out differently, and the columns move with the locale, so a real attempt is the only
+        // version- and locale-independent answer. Anything that is not a clear yes or no is
+        // reported as inconclusive so a format the backend can write is never blocked by mistake.
+        ProbeOutcome probe_creation(const std::string& format) {
+            const std::string tool = executable();
+            if (tool.empty()) return ProbeOutcome::Inconclusive;
+
+            std::error_code ec;
+            const fs::path root = fs::temp_directory_path(ec);
+            if (ec) return ProbeOutcome::Inconclusive;
+
+            const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+            const fs::path dir = root / ("hitpag-format-probe-" + std::to_string(stamp) + "-" + lower(format));
+
+            fs::remove_all(dir, ec);
+            fs::create_directories(dir, ec);
+            if (ec) return ProbeOutcome::Inconclusive;
+
+            const fs::path payload = dir / "payload.bin";
+            const fs::path archive = dir / ("probe." + lower(format));
+
+            bool wrote_payload = false;
+            {
+                std::ofstream output(payload, std::ios::binary | std::ios::trunc);
+                if (output) {
+                    output.put('x');
+                    wrote_payload = output.good();
+                }
+            }
+
+            ProbeOutcome outcome = ProbeOutcome::Inconclusive;
+            if (wrote_payload) {
+                // Mirrors the real creation command: -spd keeps wildcard characters literal and
+                // no -mx level is forced, because some codecs reject a forced copy level.
+                const auto result = process::run_command_capture(
+                    {tool, "a", "-t" + format, "-spd", "--", archive.string(), payload.string()});
+
+                std::error_code size_ec;
+                const auto size = fs::file_size(archive, size_ec);
+                const bool produced_archive = !size_ec && size > 0;
+
+                if (result.exit_code == 0 && produced_archive) {
+                    outcome = ProbeOutcome::Supported;
+                } else if (result.exit_code != 0 && !produced_archive &&
+                           is_missing_format_error(result.stdout_output)) {
+                    outcome = ProbeOutcome::Unsupported;
+                }
+            }
+
+            fs::remove_all(dir, ec);
+            return outcome;
+        }
+
+        bool backend_supports_creation(const std::string& format) {
+            static std::map<std::string, bool> cache;
+            const auto cached = cache.find(format);
+            if (cached != cache.end()) return cached->second;
+
+            // Inconclusive keeps the historical behaviour of trusting the candidate list.
+            const bool supported = probe_creation(format) != ProbeOutcome::Unsupported;
+            cache[format] = supported;
+            return supported;
+        }
     }
 
     bool is_stream_format(const std::string& format) {
