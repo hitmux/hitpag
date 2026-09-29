@@ -539,14 +539,14 @@ namespace tui::archive_ops {
                     return result.exit_code == 0 ? result.stdout_output : "";
                 }
                 if (!sevenzip::executables().empty()) {
-                    auto result = extract_7z_command(archive_path, entry_path, password);
+                    auto result = extract_7z_command(archive_path, entry_path, password, "", false, max_output);
                     return result.exit_code == 0 ? result.stdout_output : "";
                 }
                 break;
 
             case file_type::FileType::ARCHIVE_ZIP:
                 if (!sevenzip::executables().empty()) {
-                    auto result = extract_7z_command(archive_path, entry_path, password);
+                    auto result = extract_7z_command(archive_path, entry_path, password, "", false, max_output);
                     return result.exit_code == 0 ? result.stdout_output : "";
                 } else if (operation::is_tool_available("unzip")) {
                     auto result = extract_unzip_command(archive_path, entry_path, password, max_output);
