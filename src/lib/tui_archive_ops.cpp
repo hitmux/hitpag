@@ -64,18 +64,24 @@ namespace tui::archive_ops {
 
     static std::vector<ArchiveEntry> list_tar(const std::string& archive_path, file_type::FileType type) {
         std::vector<ArchiveEntry> entries;
-        std::string flags = "-tf";
+        std::vector<std::string> cmd = {"tar"};
         if (type == file_type::FileType::ARCHIVE_TAR_ZSTD) {
-            flags = "--zstd -tf";
+            /* zstd has no tar short option, so it must be its own argv element:
+             * tar rejects the merged "--zstd -tf" with exit code 64. */
+            cmd.push_back("--zstd");
+            cmd.push_back("-tf");
         } else if (type == file_type::FileType::ARCHIVE_TAR_GZ) {
-            flags = "-tzf";
+            cmd.push_back("-tzf");
         } else if (type == file_type::FileType::ARCHIVE_TAR_BZ2) {
-            flags = "-tjf";
+            cmd.push_back("-tjf");
         } else if (type == file_type::FileType::ARCHIVE_TAR_XZ) {
-            flags = "-tJf";
+            cmd.push_back("-tJf");
+        } else {
+            cmd.push_back("-tf");
         }
+        cmd.push_back(archive_path);
 
-        auto result = run_command_capture({"tar", flags, archive_path});
+        auto result = run_command_capture(cmd);
         if (result.exit_code != 0) return entries;
 
         std::istringstream stream(result.stdout_output);

@@ -387,6 +387,32 @@ namespace {
         return ok;
     }
 
+    bool test_tar_zstd_listing(const fs::path& tmp_root) {
+        if (!operation::is_tool_available("zstd")) {
+            std::cout << "skip tar.zst listing coverage: tool not available" << std::endl;
+            return true;
+        }
+
+        bool ok = true;
+        fs::path member = tmp_root / "zstd-member.txt";
+        fs::path archive_path = tmp_root / "listing.tar.zst";
+
+        ok &= expect(write_text_file(member, "zstd member\n"), "should create tar.zst input file");
+
+        const std::string create = "tar --zstd -cf \"" + archive_path.string() + "\" -C \"" +
+                                   tmp_root.string() + "\" " + member.filename().string();
+        ok &= expect(std::system(create.c_str()) == 0, "tar --zstd should create the listing test archive");
+
+        std::vector<tui::archive_ops::ArchiveEntry> entries =
+            tui::archive_ops::list_archive(archive_path.string(), file_type::FileType::ARCHIVE_TAR_ZSTD, "");
+        ok &= expect(!entries.empty(), "list_archive should list tar.zst entries");
+        if (!entries.empty()) {
+            ok &= expect_equal(entries.front().path, member.filename().string(),
+                               "list_archive should preserve the tar.zst entry path");
+        }
+        return ok;
+    }
+
     bool test_audio_preview_guards(const fs::path& tmp_root) {
         bool ok = true;
         ok &= expect(tui::archive_ops::is_audio_file("track.MP3"), "audio detection should be case-insensitive");
@@ -458,6 +484,7 @@ int main() {
     ok &= expect(write_text_file(single_file, "hello from single-file archive\n"), "should create single-file input");
 
     ok &= test_tar_text_extraction(tmp_root.path());
+    ok &= test_tar_zstd_listing(tmp_root.path());
     ok &= test_image_archive_round_trip(tmp_root.path());
     ok &= test_bounded_archive_extraction(tmp_root.path());
     ok &= test_audio_preview_guards(tmp_root.path());
