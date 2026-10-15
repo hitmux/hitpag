@@ -3,7 +3,7 @@
 **A C++17 command-line compression tool with an archive browser TUI.**
 
 [![GitHub](https://img.shields.io/badge/GitHub-Hitmux/hitpag-blue)](https://github.com/Hitmux/hitpag)
-[![Website](https://img.shields.io/badge/Website-hitmux.org-green)](https://hitmux.org)
+[![Website](https://img.shields.io/badge/Website-hitmux.com-green)](https://hitmux.com)
 
 [English](README.md) | [简体中文](README_zh.md)
 
@@ -238,4 +238,4 @@ hitpag --format=gzip input.txt output.gz
 
 ---
 
-**Developer**: [Hitmux](https://hitmux.org)
+**Developer**: [Hitmux](https://hitmux.com)
