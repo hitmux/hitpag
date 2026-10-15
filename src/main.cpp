@@ -6,7 +6,7 @@
 
 // hitpag - Smart Compression/Decompression Tool
 // Version: 2.2.0
-// website: https://hitmux.org
+// website: https://hitmux.com
 // github: https://github.com/Hitmux/hitpag
 
 #include <iostream>
