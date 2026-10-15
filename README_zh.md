@@ -3,7 +3,7 @@
 **带 TUI 归档浏览器的 C++17 命令行压缩工具。**
 
 [![GitHub](https://img.shields.io/badge/GitHub-Hitmux/hitpag-blue)](https://github.com/Hitmux/hitpag)
-[![Website](https://img.shields.io/badge/Website-hitmux.org-green)](https://hitmux.org)
+[![Website](https://img.shields.io/badge/Website-hitmux.com-green)](https://hitmux.com)
 
 [English](README.md) | [简体中文](README_zh.md)
 
@@ -238,4 +238,4 @@ hitpag --format=gzip input.txt output.gz
 
 ---
 
-**开发者**: [Hitmux](https://hitmux.org)
+**开发者**: [Hitmux](https://hitmux.com)

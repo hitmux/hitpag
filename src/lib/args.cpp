@@ -14,7 +14,7 @@
 
 namespace args {
     constexpr std::string_view APP_VERSION = "2.2.0";
-    constexpr std::string_view APP_WEBSITE = "https://hitmux.org";
+    constexpr std::string_view APP_WEBSITE = "https://hitmux.com";
     constexpr std::string_view APP_GITHUB = "https://github.com/Hitmux/hitpag";
 
     Options parse(int argc, char* argv[]) {
